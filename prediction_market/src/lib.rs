@@ -53,6 +53,7 @@ pub enum MarketError {
     NotAuthorized = 18,
     MarketNotCancelled = 19,
     RateLimitExceeded = 20,
+    ReentrancyDetected = 21,
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -70,10 +71,14 @@ pub enum DataKey {
     BettorAt(u64, u32),
     Resolver(Address),
     FeeRecipient(Address),
-    HasReferrer(Address),
     RateWindow, // packed u64: high32=window_start_hi, low32=count
     // ── Settlement-time payouts (issue #2) ───────────────────────────────
     Payout(u64, Address), // i128 — exact payout computed at resolve time
+    // ── Systemic accounting (issue #1) ────────────────────────────────────
+    CancelState(u64),   // CancelState — per-market refund bookkeeping
+    Refundable(u64, Address), // i128 — per-user refundable amount on cancellation
+    // ── Reentrancy guard (issue #1) ───────────────────────────────────────
+    Lock, // bool — instance
 }
 
 // ── Config packed into one instance storage slot ───────────────────────────
@@ -95,6 +100,16 @@ pub struct BetEntry {
     pub is_yes: bool,
     pub claimed: bool,
     pub count: u32, // how many times this user has bet on this market
+}
+
+// Cancellation bookkeeping: how much the market still owes back to its
+// bettors. Refunds are EXACTLY funded by the physical funds of the market
+// (deposits minus referral fees already paid out), so a cancelled market can
+// never drain the contract or other markets' funds.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CancelState {
+    pub refundable_remaining: i128, // Σ per-bettor refundable still unclaimed
 }
 
 // ── Domain Structs ────────────────────────────────────────────────────────────
@@ -171,6 +186,7 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .set(&DataKey::AccumulatedFees, &0_i128);
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(())
     }
 
@@ -368,63 +384,15 @@ impl PredictionMarketContract {
 
         let is_increase = existing.is_some();
 
-        // ── Fee calculation — use precomputed multipliers ─────────────────
-        let total_fee = amount * TOTAL_FEE_BPS / BPS_DENOM;
+        // ── Exact fee decomposition (net + platform + referral == amount) ──
+        let net = amount * NET_NUMERATOR / BPS_DENOM;
+        let total_fee = amount - net;
         let platform_fee = amount * PLATFORM_FEE_BPS / BPS_DENOM;
         let referral_fee = total_fee - platform_fee;
-        let net = amount * NET_NUMERATOR / BPS_DENOM;
 
-        // OPT: one Config read instead of 4 separate instance reads
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
 
-        // ── XLM transfer user → this contract ────────────────────────────
-        let xlm = token::Client::new(&env, &cfg.xlm_sac);
-        let this = env.current_contract_address();
-        xlm.transfer(&user, &this, &amount);
-
-        // ── Accumulated fees ──────────────────────────────────────────────
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees += platform_fee;
-
-        // ── Referral (skip if cached no-referrer) ─────────────────────────
-        let hr_key = DataKey::HasReferrer(user.clone());
-        let cached: Option<bool> = env.storage().persistent().get(&hr_key);
-
-        let paid_referrer = if cached == Some(false) {
-            false
-        } else {
-            xlm.transfer(&this, &cfg.referral, &referral_fee);
-            let result: bool = env.invoke_contract(
-                &cfg.referral,
-                &Symbol::new(&env, "credit"),
-                vec![
-                    &env,
-                    this.clone().into_val(&env),
-                    user.clone().into_val(&env),
-                    referral_fee.into_val(&env),
-                ],
-            );
-            if cached.is_none() {
-                env.storage().persistent().set(&hr_key, &result);
-                env.storage()
-                    .persistent()
-                    .extend_ttl(&hr_key, TTL_BUMP, TTL_HIGH);
-            }
-            result
-        };
-
-        if !paid_referrer {
-            acc_fees += referral_fee;
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
-
-        // ── Write BetEntry (net + gross + count in one write) ─────────────
+        // ── 1) Internal state writes BEFORE any external call (CEI) ────────
         let new_entry = match existing {
             Some(mut e) => {
                 e.net += net;
@@ -474,6 +442,65 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+
+        // ── 2) Reentrancy guard (covers all external calls below) ──────────
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
+
+        // ── 3) XLM transfer user → this contract ───────────────────────────
+        let xlm = token::Client::new(&env, &cfg.xlm_sac);
+        let this = env.current_contract_address();
+        xlm.transfer(&user, &this, &amount);
+
+        // ── 4) Referral — LIVE state from the registry (no stale cache) ────
+        // The referral registry is consulted on EVERY bet so a referrer
+        // registered after the first bet is honored from then on.
+        xlm.transfer(&this, &cfg.referral, &referral_fee);
+        let referral_credited: bool = env.invoke_contract(
+            &cfg.referral,
+            &Symbol::new(&env, "credit"),
+            vec![
+                &env,
+                this.clone().into_val(&env),
+                user.clone().into_val(&env),
+                referral_fee.into_val(&env),
+            ],
+        );
+
+        // ── 5) Fee + refundable bookkeeping (post-external, atomic) ────────
+        // Refundable = gross − referral fee already paid out: exactly the
+        // physical funds this market holds for this bettor, so a cancellation
+        // refund is always solvent.
+        let mut acc_fees: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccumulatedFees)
+            .unwrap_or(0);
+        acc_fees += platform_fee;
+        if !referral_credited {
+            acc_fees += referral_fee;
+        }
+        env.storage()
+            .instance()
+            .set(&DataKey::AccumulatedFees, &acc_fees);
+
+        let refundable_delta = amount - if referral_credited { referral_fee } else { 0 };
+        let refundable_key = DataKey::Refundable(market_id, user.clone());
+        let cur_refundable: i128 = env
+            .storage()
+            .persistent()
+            .get(&refundable_key)
+            .unwrap_or(0);
+        env.storage()
+            .persistent()
+            .set(&refundable_key, &(cur_refundable + refundable_delta));
+        env.storage()
+            .persistent()
+            .extend_ttl(&refundable_key, TTL_BUMP, TTL_HIGH);
+
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(())
     }
 
@@ -487,6 +514,11 @@ impl PredictionMarketContract {
     ) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_admin_or_resolver(&env, &caller)?;
+
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
 
         let mut market = Self::load_market(&env, market_id)?;
         if market.resolved {
@@ -572,6 +604,8 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(())
     }
 
@@ -581,6 +615,11 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
 
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
+
         let mut market = Self::load_market(&env, market_id)?;
         if market.resolved {
             return Err(MarketError::MarketResolved);
@@ -589,6 +628,64 @@ impl PredictionMarketContract {
             return Err(MarketError::MarketCancelled);
         }
 
+        // Total refundable principal for this market: the sum of every
+        // bettor's refundable (net + platform + unpaid referral), which by
+        // construction equals the physical funds the market brought in
+        // (minus referral fees already paid out).
+        let bettors: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BettorCount(market_id))
+            .unwrap_or(0);
+        let mut refundable_total: i128 = 0;
+        for i in 0..bettors {
+            let slot_key = DataKey::BettorAt(market_id, i);
+            let user: Address = if let Some(a) = env.storage().persistent().get(&slot_key) {
+                a
+            } else {
+                continue;
+            };
+            let bet_key = DataKey::Bet(market_id, user.clone());
+            if let Some(entry) = env.storage().persistent().get::<DataKey, BetEntry>(&bet_key) {
+                // Legacy fallback (pre-ledger deployments): gross == refundable.
+                let refundable: i128 = env
+                    .storage()
+                    .persistent()
+                    .get(&DataKey::Refundable(market_id, user))
+                    .unwrap_or(entry.gross);
+                refundable_total += refundable;
+            }
+        }
+
+        // Release THIS market's fee share from the global accumulator — fees
+        // earned by other, unrelated markets are untouched. The share is the
+        // difference between what the market owes back (refundable) and what
+        // it physically holds as staked principal (net pool).
+        let net_pool = market.total_yes + market.total_no;
+        let fee_share = refundable_total - net_pool;
+        if fee_share > 0 {
+            let mut acc_fees: i128 = env
+                .storage()
+                .instance()
+                .get(&DataKey::AccumulatedFees)
+                .unwrap_or(0);
+            acc_fees = acc_fees.saturating_sub(fee_share);
+            env.storage()
+                .instance()
+                .set(&DataKey::AccumulatedFees, &acc_fees);
+        }
+
+        let cs_key = DataKey::CancelState(market_id);
+        env.storage().persistent().set(
+            &cs_key,
+            &CancelState {
+                refundable_remaining: refundable_total,
+            },
+        );
+        env.storage()
+            .persistent()
+            .extend_ttl(&cs_key, TTL_BUMP, TTL_HIGH);
+
         market.cancelled = true;
         let mkt_key = DataKey::Market(market_id);
         env.storage().persistent().set(&mkt_key, &market);
@@ -596,58 +693,69 @@ impl PredictionMarketContract {
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
 
-        // Reclaim fees — net * fee_rate / (1 - fee_rate)
-        let net_pool = market.total_yes + market.total_no;
-        let fees_in_pool = net_pool * TOTAL_FEE_BPS / (BPS_DENOM - TOTAL_FEE_BPS);
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees = if fees_in_pool < acc_fees {
-            acc_fees - fees_in_pool
-        } else {
-            0
-        };
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
-
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(())
     }
 
     pub fn cancel_refund(env: Env, user: Address, market_id: u64) -> Result<i128, MarketError> {
         user.require_auth();
 
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
+
         let market = Self::load_market(&env, market_id)?;
         if !market.cancelled {
             return Err(MarketError::MarketNotCancelled);
         }
 
-        // OPT: read BetEntry (which now contains gross) — was a separate BetGross key
         let bet_key = DataKey::Bet(market_id, user.clone());
         let mut entry: BetEntry = env
             .storage()
             .persistent()
             .get(&bet_key)
             .ok_or(MarketError::NoBetFound)?;
-
         if entry.gross == 0 {
             return Err(MarketError::NoBetFound);
         }
 
-        let gross = entry.gross;
-        entry.gross = 0; // idempotency guard
+        // Issued at bet time; legacy bets fall back to full gross.
+        let refundable: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Refundable(market_id, user.clone()))
+            .unwrap_or(entry.gross);
+
+        // Bookkeeping: reduce the market's outstanding refund balance.
+        let cs_key = DataKey::CancelState(market_id);
+        let mut cs: CancelState = env
+            .storage()
+            .persistent()
+            .get(&cs_key)
+            .ok_or(MarketError::NoBetFound)?;
+        cs.refundable_remaining = cs.refundable_remaining.saturating_sub(refundable);
+        env.storage().persistent().set(&cs_key, &cs);
+        env.storage()
+            .persistent()
+            .extend_ttl(&cs_key, TTL_BUMP, TTL_HIGH);
+
+        // Idempotency guard.
+        entry.gross = 0;
         env.storage().persistent().set(&bet_key, &entry);
+        env.storage().persistent().set(&DataKey::Refundable(market_id, user.clone()), &0_i128);
 
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
-        token::Client::new(&env, &cfg.xlm_sac).transfer(
-            &env.current_contract_address(),
-            &user,
-            &gross,
-        );
+        if refundable > 0 {
+            token::Client::new(&env, &cfg.xlm_sac).transfer(
+                &env.current_contract_address(),
+                &user,
+                &refundable,
+            );
+        }
 
-        Ok(gross)
+        env.storage().instance().set(&DataKey::Lock, &false);
+        Ok(refundable)
     }
 
     // ── Claim ─────────────────────────────────────────────────────────────
@@ -655,6 +763,11 @@ impl PredictionMarketContract {
 
     pub fn claim(env: Env, user: Address, market_id: u64) -> Result<(), MarketError> {
         user.require_auth();
+
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
 
         let market = Self::load_market(&env, market_id)?;
         if market.cancelled {
@@ -731,6 +844,7 @@ impl PredictionMarketContract {
             ],
         );
 
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(())
     }
 
@@ -744,12 +858,18 @@ impl PredictionMarketContract {
         caller.require_auth();
         Self::require_admin_or_fee_recipient(&env, &caller)?;
 
+        if Self::get(&env) {
+            return Err(MarketError::ReentrancyDetected);
+        }
+        env.storage().instance().set(&DataKey::Lock, &true);
+
         let fees: i128 = env
             .storage()
             .instance()
             .get(&DataKey::AccumulatedFees)
             .unwrap_or(0);
         if fees == 0 {
+            env.storage().instance().set(&DataKey::Lock, &false);
             return Err(MarketError::NoFeesToWithdraw);
         }
 
@@ -763,6 +883,7 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .set(&DataKey::AccumulatedFees, &0_i128);
+        env.storage().instance().set(&DataKey::Lock, &false);
         Ok(fees)
     }
 
@@ -827,6 +948,19 @@ impl PredictionMarketContract {
             .unwrap_or(0)
     }
 
+    pub fn get_cancel_state(env: Env, market_id: u64) -> Option<CancelState> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::CancelState(market_id))
+    }
+
+    pub fn get_refundable(env: Env, market_id: u64, user: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Refundable(market_id, user))
+            .unwrap_or(0)
+    }
+
     pub fn get_user_bet_count(env: Env, market_id: u64, user: Address) -> u32 {
         env.storage()
             .persistent()
@@ -844,6 +978,14 @@ impl PredictionMarketContract {
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────
+
+    #[inline]
+    fn get(env: &Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Lock)
+            .unwrap_or(false)
+    }
 
     #[inline]
     fn load_market(env: &Env, market_id: u64) -> Result<Market, MarketError> {
