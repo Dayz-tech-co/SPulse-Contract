@@ -1,5 +1,6 @@
 use super::*;
 use soroban_sdk::{
+    contract, contractimpl, contracttype,
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
     Env, String,
@@ -1129,4 +1130,190 @@ fn test_single_winner_gets_whole_net_pool() {
     // Whole pool (both nets) goes to the single winner.
     assert_eq!(t.xlm.balance(&winner) - before, total);
     assert_eq!(t.client.get_payout(&id, &winner), total);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECURITY REGRESSION SUITE — issue #1 (systemic accounting)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ── #1: cancelling market A must NOT erase market B's fees ────────────────
+#[test]
+fn test_cancel_preserves_unrelated_market_fees() {
+    let t = setup();
+    let id_a = create_test_market(&t);
+    let id_b = create_test_market(&t);
+    let user_a = Address::generate(&t.env);
+    let user_b = Address::generate(&t.env);
+    fund_user(&t, &user_a, 200_0000000);
+    fund_user(&t, &user_b, 200_0000000);
+
+    t.client.place_bet(&user_a, &id_a, &true, &100_0000000_i128); // 2% fee
+    t.client.place_bet(&user_b, &id_b, &true, &50_0000000_i128); // 2% fee
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
+
+    t.client.cancel_market(&t.admin, &id_a);
+
+    // ONLY market A's fee share leaves the accumulator.
+    assert_eq!(t.client.get_accumulated_fees(), 1_0000000);
+
+    // Full refund for A's user.
+    assert_eq!(t.client.cancel_refund(&user_a, &id_a), 100_0000000);
+
+    // Market B is untouched and can still resolve/withdraw normally.
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id_b, &true);
+    let withdrawn = t.client.withdraw_fees(&t.admin, &t.admin);
+    assert_eq!(withdrawn, 1_0000000);
+}
+
+// ── #1: referrer-backed cancellation is solvent — refund excludes the ─────
+// already-paid referral fee; the referrer keeps it; contract is square.
+#[test]
+fn test_cancel_referrer_backed_refund_excludes_paid_fee() {
+    let t = setup();
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    let referrer = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+
+    t.referral_client.register_referral(
+        &user,
+        &String::from_str(&t.env, "Bettor"),
+        &Some(referrer.clone()),
+    );
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+
+    // 150 bps platform fee is in the accumulator; 50 bps already sent out.
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
+    assert_eq!(t.xlm.balance(&referrer), 5000000);
+    // The refundable exactly equals what the market physically holds for
+    // this bettor: gross 100 XLM minus the 0.5 XLM paid to the referrer.
+    assert_eq!(t.client.get_refundable(&id, &user), 99_5000000);
+
+    let market_contract = t.client.address.clone();
+    let contract_before = t.xlm.balance(&market_contract);
+
+    t.client.cancel_market(&t.admin, &id);
+    let cs = t.client.get_cancel_state(&id).unwrap();
+    assert_eq!(cs.refundable_remaining, 99_5000000);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+
+    let refund = t.client.cancel_refund(&user, &id);
+    assert_eq!(refund, 99_5000000);
+    assert_eq!(t.xlm.balance(&referrer), 5000000); // referrer keeps the fee
+    // The contract returned every stroop it held for this market.
+    assert_eq!(
+        contract_before - t.xlm.balance(&market_contract),
+        99_5000000
+    );
+}
+
+// ── #1: referrer registered AFTER the first bet must be honored ──────────────
+#[test]
+fn test_referral_registered_after_first_bet_honored() {
+    let t = setup();
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    let referrer = Address::generate(&t.env);
+    fund_user(&t, &user, 500_0000000);
+
+    // First bet with NO referrer registered -> full 2% retained.
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+    assert_eq!(t.client.get_accumulated_fees(), 2_0000000);
+    assert_eq!(t.xlm.balance(&referrer), 0);
+
+    // Register a referrer after the fact (legitimate user action).
+    t.referral_client.register_referral(
+        &user,
+        &String::from_str(&t.env, "Late"),
+        &Some(referrer.clone()),
+    );
+
+    // Second bet: the referrer is paid from now on + the referrer gets pts.
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+    assert_eq!(t.xlm.balance(&referrer), 5000000);
+    assert_eq!(t.leaderboard_client.get_points(&referrer), 3);
+    assert_eq!(t.client.get_accumulated_fees(), 2_0000000 + 1_5000000);
+}
+
+// ── Reentrancy guard regression (issue #1) ───────────────────────────────────
+// A malicious referral contract that re-enters the prediction market during
+// `credit` (which the market invokes mid-`place_bet`, while its reentrancy lock
+// is held). The re-entrant bet MUST be rejected with ReentrancyDetected and its
+// partial state writes rolled back — otherwise a single bet could be double
+// counted (bet entry + market totals).
+
+#[contract]
+pub struct EvilReferral;
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum EvilDataKey {
+    MarketId,
+}
+
+#[contractimpl]
+impl EvilReferral {
+    pub fn set_market_id(env: Env, market_id: u64) {
+        env.storage()
+            .instance()
+            .set(&EvilDataKey::MarketId, &market_id);
+    }
+
+    // Called by the prediction market during place_bet. Re-enters place_bet on
+    // the same market (same user, same side, same amount) while the market is
+    // mid-execution. The re-entrant call MUST be rejected — either by the
+    // Soroban host's re-entry protection (Error(Context, InvalidAction)) or by
+    // the contract's own Lock guard (ReentrancyDetected). If it were allowed,
+    // the nested bet would double-count the bettor's position and market totals.
+    pub fn credit(env: Env, market: Address, user: Address, amount: i128) -> bool {
+        let market_id: u64 = env
+            .storage()
+            .instance()
+            .get(&EvilDataKey::MarketId)
+            .expect("market id must be set");
+        let client = PredictionMarketContractClient::new(&env, &market);
+        let result = client.try_place_bet(&user, &market_id, &true, &amount);
+        assert!(
+            result.is_err(),
+            "re-entrant place_bet must be rejected (host re-entry guard or contract Lock)"
+        );
+        false // never credit a referrer
+    }
+}
+
+#[test]
+fn test_reentrancy_guard_rejects_reentrant_bet() {
+    let t = setup();
+
+    // Register a malicious referral contract that re-enters place_bet, and
+    // point the market's referral at it.
+    let evil_id = t.env.register(EvilReferral, ());
+    let evil_client = EvilReferralClient::new(&t.env, &evil_id);
+
+    let cfg = t.client.get_config();
+    t.client.set_config(
+        &t.admin,
+        &cfg.token,
+        &evil_id,
+        &cfg.leaderboard,
+        &cfg.xlm_sac,
+    );
+
+    let market_id = create_test_market(&t);
+    evil_client.set_market_id(&market_id);
+
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 1_000_000_000);
+    let amount = 100_000_000i128;
+
+    // The outer bet succeeds; the re-entrant bet inside credit is rejected and
+    // its partial writes rolled back, so the bet is counted exactly once.
+    t.client.place_bet(&user, &market_id, &true, &amount);
+
+    let net = amount * 9_800 / 10_000;
+    let market = t.client.get_market(&market_id);
+    assert_eq!(market.total_yes, net, "no double-counting of the bet");
+    assert_eq!(market.bet_count, 1, "bet counted exactly once");
+    assert_eq!(t.client.get_accumulated_fees(), 2_000_000, "full 2% retained (no referrer credited)");
 }
