@@ -1557,7 +1557,15 @@ fn test_get_market_ttl_tracks_live_entry() {
     let t = setup();
     assert_eq!(t.client.get_market_ttl(&99_u64), 0);
     let id = create_test_market(&t);
-    assert!(t.client.get_market_ttl(&id) >= TTL_BUMP);
+    // get_market_ttl only reports existence (0 or 1); verify the key
+    // actually has a real TTL via the testutils API.
+    assert!(t.client.get_market_ttl(&id) > 0);
+    let market_contract = t.client.address.clone();
+    let key = DataKey::Market(id);
+    let real_ttl = t.env.as_contract(&market_contract, || {
+        t.env.storage().persistent().get_ttl(&key)
+    });
+    assert!(real_ttl >= TTL_BUMP);
 }
 
 #[test]
@@ -1584,7 +1592,8 @@ fn test_refresh_market_ttl_rebumps_bet_and_market() {
     assert_eq!(t.client.refresh_market_ttl(&id), 1);
     assert!(ttl(&bet_key) > bet_before);
     assert!(ttl(&market_key) > market_before);
-    assert!(t.client.get_market_ttl(&id) > market_before);
+    // get_market_ttl only reports existence (0 or 1), verify via testutils
+    assert!(t.client.get_market_ttl(&id) > 0);
 }
 
 #[test]
@@ -1598,11 +1607,16 @@ fn test_refresh_markets_migrates_existing_entries() {
     t.client.place_bet(&user, &b, &true, &100_0000000_i128);
 
     advance_ledgers(&t.env, 6_000_000);
-    let before_a = t.client.get_market_ttl(&a);
+    let market_contract = t.client.address.clone();
+    let real_ttl = |id: u64| -> u32 {
+        let key = DataKey::Market(id);
+        t.env.as_contract(&market_contract, || t.env.storage().persistent().get_ttl(&key))
+    };
+    let before_a = real_ttl(a);
     let bumped = t.client.refresh_markets(&1_u64, &20_u32);
     assert_eq!(bumped, 2);
-    assert!(t.client.get_market_ttl(&a) > before_a);
-    assert!(t.client.get_market_ttl(&b) >= TTL_BUMP);
+    assert!(real_ttl(a) > before_a);
+    assert!(real_ttl(b) >= TTL_BUMP);
 }
 
 #[test]
@@ -2113,8 +2127,9 @@ fn test_set_config_non_governor_rejected() {
 
 fn last_event_name(env: &Env) -> Symbol {
     let events = env.events().all();
-    let last = events.get(events.len() - 1).unwrap();
-    let topic0: Val = last.1.get_unchecked(0);
+    let emitted = events.events();
+    let soroban_sdk::xdr::ContractEventBody::V0(body) = &emitted.last().unwrap().body;
+    let topic0: Val = Val::try_from_val(env, &body.topics[0]).unwrap();
     Symbol::try_from_val(env, &topic0).unwrap()
 }
 
@@ -2573,16 +2588,16 @@ fn test_accumulated_fees_is_always_derived() {
     assert_eq!(t.client.get_market_fees(&id), 1_5000000);
     assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
 
-    // After resolution with dust — dust goes to per-market fee.
+    // After resolution — single winner gets the full pool, so dust = 0.
     advance_time(&t.env, 3601);
     t.client.resolve_market(&t.admin, &id, &true);
-    let dust = 100_0000000 + 200_0000000 - ((100_0000000 + 200_0000000) * 100_0000000 / (100_0000000 + 200_0000000));
-    let expected_total = 1_5000000 + dust;
-    assert_eq!(t.client.get_accumulated_fees(), expected_total);
+    // Only the platform fee remains; dust is 0 because the single YES bettor
+    // wins the entire pool (payout == total_pool).
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
 
     // After claim — fees remain in per-market ledger (claims don't touch fees).
     t.client.claim(&user, &id);
-    assert_eq!(t.client.get_accumulated_fees(), expected_total);
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
 
     // After cancel — full per-market ledger reclaimed.
     let id2 = create_test_market(&t);
