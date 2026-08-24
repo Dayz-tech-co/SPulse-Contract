@@ -1,0 +1,27 @@
+name: CI
+
+# Scoped to `leaderboard` only for now, not the whole workspace. `cargo test
+# --workspace` currently fails for reasons that have nothing to do with any
+# one PR: `referral_registry/src/lib.rs` was emptied by a bad merge (see
+# issue tracker / PR #185 discussion) and `prediction_market`'s test suite
+# depends on it as a dev-dependency. Gate the whole workspace here once that
+# is repaired — until then a workspace-wide job would be red on every PR
+# regardless of what it actually changes, which trains everyone to ignore CI
+# rather than trust it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test-leaderboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No explicit toolchain action: ubuntu-latest ships rustup, and it
+      # picks up this repo's rust-toolchain.toml (channel = "1.91.0")
+      # automatically on the first cargo invocation.
+      - run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test -p leaderboard --verbose

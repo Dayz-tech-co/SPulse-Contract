@@ -467,13 +467,17 @@ impl PredictionMarketContract {
             .instance()
             .set(&DataKey::PinnedHashes, &pending.hashes);
         env.storage().instance().remove(&DataKey::PendingConfig);
+        // Matches the documented event schema at the top of this file:
+        // config_changed (admin) Config. `caller` is the governor who
+        // executed the change (the only actor actually in scope here);
+        // `pending.cfg` is the live Config, matching the documented data
+        // type. This replaces two merge-corrupted publishes that used to sit
+        // here: a duplicate "cfg_act" event, and this event referencing
+        // `admin`/`token_contract`/`referral_contract`/`leaderboard_contract`
+        // /`xlm_sac` — none of which are in scope in this function.
         env.events().publish(
-            (Symbol::new(&env, "cfg_act"), caller),
+            (Symbol::new(&env, "config_changed"), caller),
             pending.cfg,
-        );
-        env.events().publish(
-            (Symbol::new(&env, "config_changed"), admin),
-            (token_contract, referral_contract, leaderboard_contract, xlm_sac),
         );
         Ok(())
     }
@@ -595,6 +599,8 @@ impl PredictionMarketContract {
             .instance()
             .get(&DataKey::GovernorCount)
             .unwrap_or(0)
+    }
+
     /// The cross-contract ABI version this deployment implements (issue #84).
     pub fn interface_version(_env: Env) -> u32 {
         INTERFACE_VERSION
@@ -1618,15 +1624,19 @@ impl PredictionMarketContract {
         Self::ensure_fee_ledger_migrated(&env);
     }
 
-    /// Remaining TTL (ledgers) of the Market key. 0 means missing/expired —
-    /// integrators can warn before funds become unrecoverable (issue #54).
-    pub fn get_market_ttl(env: Env, market_id: u64) -> u32 {
-        let key = DataKey::Market(market_id);
-        if !env.storage().persistent().has(&key) {
-            return 0;
-        }
-        env.storage().persistent().get_ttl(&key)
-    }
+    // get_market_ttl (issue #54) removed: it called
+    // env.storage().persistent().get_ttl(&key), which only exists on
+    // soroban_sdk::testutils::storage::Persistent — backed by
+    // env.host().get_contract_data_live_until_ledger(...), a local
+    // test-sandbox introspection capability, not something a real deployed
+    // contract can call on a live network. This function could not compile
+    // for a production build; there is no supported way to query another
+    // key's remaining TTL from within contract code in this SDK version. A
+    // real fix would need the contract to track its own expected expiry
+    // (e.g. record target_ledger = current_sequence + extend_to on every
+    // extend_ttl of Market-related keys) — new state and its own tests, not
+    // a merge repair. Left for a dedicated follow-up if this integrator
+    // safety feature is still wanted.
 
     /// Permissionless keeper: anyone may pay to extend this market's
     /// Market/Bet/Payout/bettor-index keys. Does not resurrect expired entries.

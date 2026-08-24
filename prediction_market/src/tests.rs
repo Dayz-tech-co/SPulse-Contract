@@ -1550,15 +1550,14 @@ fn test_cancel_refund_rebumps_ttl_entries() {
     assert!(ttl(&market_key) > market_before);
 }
 
-// ── #54: permissionless refresh + per-market expiry tracking + migration ─────
-
-#[test]
-fn test_get_market_ttl_tracks_live_entry() {
-    let t = setup();
-    assert_eq!(t.client.get_market_ttl(&99_u64), 0);
-    let id = create_test_market(&t);
-    assert!(t.client.get_market_ttl(&id) >= TTL_BUMP);
-}
+// ── #54: permissionless refresh + expiry tracking + migration ────────────────
+//
+// get_market_ttl (a public read of another key's remaining TTL) was removed:
+// it called an SDK method that only exists in the local test sandbox, not on
+// a real deployed contract — see the comment at its former call site in
+// lib.rs. These tests read TTL directly via the same
+// testutils::storage::Persistent mechanism the contract itself cannot use in
+// production, which is exactly why that was never a viable public API.
 
 #[test]
 fn test_refresh_market_ttl_rebumps_bet_and_market() {
@@ -1584,7 +1583,6 @@ fn test_refresh_market_ttl_rebumps_bet_and_market() {
     assert_eq!(t.client.refresh_market_ttl(&id), 1);
     assert!(ttl(&bet_key) > bet_before);
     assert!(ttl(&market_key) > market_before);
-    assert!(t.client.get_market_ttl(&id) > market_before);
 }
 
 #[test]
@@ -1597,12 +1595,18 @@ fn test_refresh_markets_migrates_existing_entries() {
     t.client.place_bet(&user, &a, &true, &100_0000000_i128);
     t.client.place_bet(&user, &b, &true, &100_0000000_i128);
 
+    let market_contract = t.client.address.clone();
+    let ttl = |key: &DataKey| -> u32 {
+        t.env
+            .as_contract(&market_contract, || t.env.storage().persistent().get_ttl(key))
+    };
+
     advance_ledgers(&t.env, 6_000_000);
-    let before_a = t.client.get_market_ttl(&a);
+    let before_a = ttl(&DataKey::Market(a));
     let bumped = t.client.refresh_markets(&1_u64, &20_u32);
     assert_eq!(bumped, 2);
-    assert!(t.client.get_market_ttl(&a) > before_a);
-    assert!(t.client.get_market_ttl(&b) >= TTL_BUMP);
+    assert!(ttl(&DataKey::Market(a)) > before_a);
+    assert!(ttl(&DataKey::Market(b)) >= TTL_BUMP);
 }
 
 #[test]
