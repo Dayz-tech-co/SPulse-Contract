@@ -2185,7 +2185,7 @@ fn test_cancel_does_not_wipe_other_market_fees() {
 }
 
 #[test]
-fn test_cancel_reclaims_pool_fees_not_inflated_ledger() {
+fn test_cancel_reclaims_full_per_market_ledger() {
     let t = setup();
     let id = create_test_market(&t);
     let alice = Address::generate(&t.env);
@@ -2193,22 +2193,20 @@ fn test_cancel_reclaims_pool_fees_not_inflated_ledger() {
     t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
     assert_eq!(t.client.get_market_fees(&id), 1_5000000);
 
-    // Simulate an inflated per-market ledger (10 XLM recorded vs 1.5 earned).
+    // Issue #178: cancel_market reclaims the full per-market ledger balance,
+    // not a formula-based cap.  Even if the ledger was artificially inflated,
+    // the entire balance is reclaimed because it is isolated per market.
     t.env.as_contract(&t.client.address, || {
         t.env
             .storage()
             .persistent()
             .set(&DataKey::MarketFees(id), &10_0000000_i128);
-        t.env
-            .storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &10_0000000_i128);
     });
 
     t.client.cancel_market(&t.admin, &id);
-    // Only pool-attributable fees (1.5 XLM) leave the ledger on cancel.
-    assert_eq!(t.client.get_market_fees(&id), 8_5000000);
-    assert_eq!(t.client.get_accumulated_fees(), 8_5000000);
+    // Full ledger balance is reclaimed — no stranded dust.
+    assert_eq!(t.client.get_market_fees(&id), 0);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
 }
 
 #[test]
@@ -2469,4 +2467,164 @@ fn test_resolver_cannot_drain_principal_immediately_after_zero_side() {
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
     t.client.withdraw_fees(&t.admin, &treasury);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE #178 — per-market fee provenance / derived AccumulatedFees
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_per_market_fee_provenance_is_isolated() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let id2 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 2"),
+        &String::from_str(&t.env, "https://m2.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 500_0000000);
+    fund_user(&t, &bob, 500_0000000);
+
+    // Different bet sizes → different platform fees.
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128); // 1.5 XLM
+    t.client.place_bet(&bob, &id2, &true, &200_0000000_i128); // 3.0 XLM
+
+    assert_eq!(t.client.get_market_fees(&id1), 1_5000000);
+    assert_eq!(t.client.get_market_fees(&id2), 3_0000000);
+    assert_eq!(t.client.get_accumulated_fees(), 4_5000000);
+
+    // Cancel market 1 — only its fees should be removed.
+    t.client.cancel_market(&t.admin, &id1);
+
+    assert_eq!(t.client.get_market_fees(&id1), 0);
+    assert_eq!(t.client.get_market_fees(&id2), 3_0000000);
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
+
+    // Bettor on market 1 gets gross back.
+    let alice_before = t.xlm.balance(&alice);
+    t.client.cancel_refund(&alice, &id1);
+    assert_eq!(t.xlm.balance(&alice), alice_before + 100_0000000);
+
+    // Market 2 fees remain untouched — can be withdrawn.
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let withdrawn = t.client.withdraw_fees(&t.admin, &treasury);
+    assert!(withdrawn > 0);
+}
+
+#[test]
+fn test_withdraw_only_takes_from_per_market_ledgers() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let id2 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 2"),
+        &String::from_str(&t.env, "https://m2.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 200_0000000);
+    fund_user(&t, &bob, 200_0000000);
+
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128); // 1.5 XLM
+    t.client.place_bet(&bob, &id2, &true, &100_0000000_i128); // 1.5 XLM
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
+
+    // Withdraw — debits from per-market ledgers (newest first).
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let fees = t.client.get_accumulated_fees();
+    let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM; // 20% = 6000000
+    let withdrawn = t.client.withdraw_fees(&t.admin, &treasury);
+    assert_eq!(withdrawn, cap);
+
+    // Total should be reduced by exactly the withdrawn amount.
+    assert_eq!(
+        t.client.get_accumulated_fees(),
+        3_0000000 - cap
+    );
+
+    // Individual market fees are debited proportionally from per-market ledgers.
+    let remaining1 = t.client.get_market_fees(&id1);
+    let remaining2 = t.client.get_market_fees(&id2);
+    assert_eq!(remaining1 + remaining2, 3_0000000 - cap);
+}
+
+#[test]
+fn test_accumulated_fees_is_always_derived() {
+    let t = setup();
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 500_0000000);
+
+    // Before any bets — total is 0.
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+
+    // After one bet — total equals per-market fee.
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+    assert_eq!(t.client.get_market_fees(&id), 1_5000000);
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
+
+    // After resolution with dust — dust goes to per-market fee.
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
+    let dust = 100_0000000 + 200_0000000 - ((100_0000000 + 200_0000000) * 100_0000000 / (100_0000000 + 200_0000000));
+    let expected_total = 1_5000000 + dust;
+    assert_eq!(t.client.get_accumulated_fees(), expected_total);
+
+    // After claim — fees remain in per-market ledger (claims don't touch fees).
+    t.client.claim(&user, &id);
+    assert_eq!(t.client.get_accumulated_fees(), expected_total);
+
+    // After cancel — full per-market ledger reclaimed.
+    let id2 = create_test_market(&t);
+    let user2 = Address::generate(&t.env);
+    fund_user(&t, &user2, 200_0000000);
+    t.client.place_bet(&user2, &id2, &true, &100_0000000_i128);
+    let total_before_cancel = t.client.get_accumulated_fees();
+    let market2_fees = t.client.get_market_fees(&id2);
+    t.client.cancel_market(&t.admin, &id2);
+    assert_eq!(
+        t.client.get_accumulated_fees(),
+        total_before_cancel - market2_fees
+    );
+}
+
+#[test]
+fn test_migration_snapshots_and_removes_global_counter() {
+    let t = setup();
+    let legacy_amount: i128 = 7_5000000;
+    t.env.as_contract(&t.client.address, || {
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::AccumulatedFees, &legacy_amount);
+        t.env.storage().instance().remove(&DataKey::FeeLedgerMigrated);
+    });
+
+    t.client.migrate_fee_ledger();
+    assert_eq!(t.client.get_legacy_fees(), legacy_amount);
+    assert_eq!(t.client.get_accumulated_fees(), legacy_amount);
+
+    // The old AccumulatedFees storage key is removed — total is now derived.
+    t.env.as_contract(&t.client.address, || {
+        assert!(!t.env.storage().instance().has(&DataKey::AccumulatedFees));
+    });
+
+    // New bets land on per-market ledgers, total is still derived correctly.
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+    assert_eq!(t.client.get_legacy_fees(), legacy_amount);
+    assert_eq!(t.client.get_market_fees(&id), 1_5000000);
+    assert_eq!(t.client.get_accumulated_fees(), legacy_amount + 1_5000000);
 }
