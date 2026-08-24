@@ -3966,7 +3966,7 @@ fn test_inv_pulse_supply_tracks_rewards() {
 
     // Total supply = winner tokens + loser tokens
     let expected_supply = WIN_TOKENS + LOSE_TOKENS;
-    assert_eq!(t.token_client.get_total_supply(), expected_supply);
+    assert_eq!(t.token_client.total_supply(), expected_supply);
 }
 
 /// Invariant 5: Market TTL must outlive the market duration + dispute window.
