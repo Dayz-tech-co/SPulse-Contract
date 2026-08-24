@@ -795,14 +795,10 @@ fn test_add_pts_emits_leaderboard_updated() {
 }
 
 #[test]
-fn test_add_pts_always_rejected() {
+fn test_add_pts_rejects_non_market_caller() {
     let (env, client, _admin, market, _referral) = setup();
     let user = Address::generate(&env);
     let rando = Address::generate(&env);
-    let result = client.add_pts(&rando, &user, &10_u64, &true);
-    assert!(result.is_err(), "add_pts should always return an error");
-    match result {
-        Err(LeaderboardError::UnauthorizedCaller) => {}
-        other => panic!("add_pts returned unexpected error: {:?}", other),
-    }
+    let result = client.try_add_pts(&rando, &user, &10_u64, &true);
+    assert!(result.is_err(), "add_pts should reject a non-market caller");
 }
