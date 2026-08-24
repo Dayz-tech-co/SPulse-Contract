@@ -2004,6 +2004,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "AccumulatedFees"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "24000000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "Admin"
                           }
                         ]

@@ -1678,10 +1678,11 @@ fn test_interface_version_reported() {
 #[should_panic(expected = "Error(Contract, #36)")]
 fn test_place_bet_rejects_incompatible_referral() {
     let t = setup();
-    let id = create_test_market(&t);
     let user = Address::generate(&t.env);
     fund_user(&t, &user, 200_0000000);
 
+    // Activate the incompatible referral contract first so the market
+    // doesn't expire during the config delay window (CONFIG_DELAY_SECS).
     let fake_referral = t.env.register(MockIncompatibleDependency, ());
     let cfg = t.client.get_config();
     activate_config(
@@ -1692,6 +1693,8 @@ fn test_place_bet_rejects_incompatible_referral() {
         &cfg.xlm_sac,
     );
 
+    // Now create the market after the time advance.
+    let id = create_test_market(&t);
     t.client.place_bet(&user, &id, &true, &100_0000000_i128);
 }
 
@@ -2200,7 +2203,7 @@ fn test_cancel_does_not_wipe_other_market_fees() {
 }
 
 #[test]
-fn test_cancel_reclaims_full_per_market_ledger() {
+fn test_cancel_market_caps_reclaim_at_provable_fees() {
     let t = setup();
     let id = create_test_market(&t);
     let alice = Address::generate(&t.env);
@@ -2208,9 +2211,7 @@ fn test_cancel_reclaims_full_per_market_ledger() {
     t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
     assert_eq!(t.client.get_market_fees(&id), 1_5000000);
 
-    // Issue #178: cancel_market reclaims the full per-market ledger balance,
-    // not a formula-based cap.  Even if the ledger was artificially inflated,
-    // the entire balance is reclaimed because it is isolated per market.
+    // Artificially inflate the ledger beyond the provable amount.
     t.env.as_contract(&t.client.address, || {
         t.env
             .storage()
@@ -2219,8 +2220,12 @@ fn test_cancel_reclaims_full_per_market_ledger() {
     });
 
     t.client.cancel_market(&t.admin, &id);
-    // Full ledger balance is reclaimed — no stranded dust.
-    assert_eq!(t.client.get_market_fees(&id), 0);
+    // Only the provable fee amount (from the bet pool) is reclaimed,
+    // not the full inflated ledger.  The inflated remainder is stranded.
+    let net_pool = 100_0000000_i128 * NET_NUMERATOR / BPS_DENOM;
+    let provable = net_pool * PLATFORM_FEE_BPS / NET_NUMERATOR;
+    assert_eq!(t.client.get_market_fees(&id), 10_0000000 - provable);
+    // Cache was 1.5M (from credit) and reclaimed 1.5M, so it's now 0.
     assert_eq!(t.client.get_accumulated_fees(), 0);
 }
 
@@ -2629,9 +2634,9 @@ fn test_migration_snapshots_and_removes_global_counter() {
     assert_eq!(t.client.get_legacy_fees(), legacy_amount);
     assert_eq!(t.client.get_accumulated_fees(), legacy_amount);
 
-    // The old AccumulatedFees storage key is removed — total is now derived.
+    // AccumulatedFees is kept as the running cache — total is still correct.
     t.env.as_contract(&t.client.address, || {
-        assert!(!t.env.storage().instance().has(&DataKey::AccumulatedFees));
+        assert!(t.env.storage().instance().has(&DataKey::AccumulatedFees));
     });
 
     // New bets land on per-market ledgers, total is still derived correctly.
@@ -2642,4 +2647,99 @@ fn test_migration_snapshots_and_removes_global_counter() {
     assert_eq!(t.client.get_legacy_fees(), legacy_amount);
     assert_eq!(t.client.get_market_fees(&id), 1_5000000);
     assert_eq!(t.client.get_accumulated_fees(), legacy_amount + 1_5000000);
+}
+
+#[test]
+fn test_fee_theft_inflation_attack_prevented() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let id2 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 2"),
+        &String::from_str(&t.env, "https://m2.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 200_0000000);
+    fund_user(&t, &bob, 200_0000000);
+
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128); // 1.5 XLM fees
+    t.client.place_bet(&bob, &id2, &true, &100_0000000_i128); // 1.5 XLM fees
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
+
+    // Attacker inflates market 1's ledger via direct storage manipulation.
+    t.env.as_contract(&t.client.address, || {
+        t.env
+            .storage()
+            .persistent()
+            .set(&DataKey::MarketFees(id1), &1000_0000000_i128);
+    });
+
+    // Attacker cancels market 1 to try to drain other markets' fees.
+    t.client.cancel_market(&t.admin, &id1);
+
+    // Market 2's fees remain untouched.
+    assert_eq!(t.client.get_market_fees(&id2), 1_5000000);
+
+    // The cache was 3M.  cancel_market reclaimed provable fees from
+    // market 1 (capped at net_pool * 150/9800 = 1.5M), so cache is now 1.5M.
+    // Only market 2's legitimate fees remain accessible.
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
+
+    // Attacker cannot withdraw the inflated amount -- debit_proven_fees
+    // caps at the cached total (1.5M, not 1000M).
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let withdrawn = withdraw_all_admin_fees(&t, &treasury);
+    assert_eq!(withdrawn, 1_5000000);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+}
+
+#[test]
+fn test_migration_from_existing_per_market_fees() {
+    let t = setup();
+
+    // Simulate pre-upgrade state: global counter + per-market entries
+    // that were written before migration (e.g. from a parallel branch).
+    let legacy_amount: i128 = 5_0000000;
+    let market_fees_amount: i128 = 3_0000000;
+
+    t.env.as_contract(&t.client.address, || {
+        t.env
+            .storage()
+            .instance()
+            .set(&DataKey::AccumulatedFees, &legacy_amount);
+        t.env.storage().instance().remove(&DataKey::FeeLedgerMigrated);
+        // Pre-existing per-market fee from a parallel branch.
+        t.env
+            .storage()
+            .persistent()
+            .set(&DataKey::MarketFees(1), &market_fees_amount);
+    });
+
+    // Create the market entry so MarketCount is correct.
+    let _id = create_test_market(&t);
+
+    t.client.migrate_fee_ledger();
+
+    // LegacyFees should have the old global counter value.
+    assert_eq!(t.client.get_legacy_fees(), legacy_amount);
+
+    // Pre-existing per-market fees should be preserved.
+    assert_eq!(t.client.get_market_fees(&1), market_fees_amount);
+
+    // AccumulatedFees should be the sum of legacy + per-market.
+    assert_eq!(t.client.get_accumulated_fees(), legacy_amount + market_fees_amount);
+
+    // New bets after migration land on per-market ledgers and increment the cache.
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+    t.client.place_bet(&user, &_id, &true, &100_0000000_i128);
+    assert_eq!(
+        t.client.get_accumulated_fees(),
+        legacy_amount + market_fees_amount + 1_5000000
+    );
 }
