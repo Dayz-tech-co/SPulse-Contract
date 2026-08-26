@@ -5,6 +5,7 @@ members = [
     "pulse_token",
     "referral_registry",
     "leaderboard",
+    "cross_contract_invariants",
 ]
 
 [workspace.dependencies]

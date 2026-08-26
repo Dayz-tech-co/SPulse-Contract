@@ -1,0 +1,28 @@
+[package]
+name = "cross_contract_invariants"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[features]
+testutils = [
+    "soroban-sdk/testutils",
+    "prediction_market/testutils",
+    "pulse_token/testutils",
+    "referral_registry/testutils",
+    "leaderboard/testutils",
+]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+prediction_market = { path = "../prediction_market" }
+pulse_token = { path = "../pulse_token" }
+referral_registry = { path = "../referral_registry" }
+leaderboard = { path = "../leaderboard" }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+prediction_market = { path = "../prediction_market", features = ["testutils"] }
+pulse_token = { path = "../pulse_token", features = ["testutils"] }
+referral_registry = { path = "../referral_registry", features = ["testutils"] }
+leaderboard = { path = "../leaderboard", features = ["testutils"] }
