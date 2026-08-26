@@ -4418,10 +4418,11 @@ fn test_inv_withdraw_cap_scales_with_market_count() {
     let t = setup();
 
     let mut ids: Vec<u64> = Vec::new(&t.env);
+    let market_names = ["Market 0", "Market 1", "Market 2", "Market 3", "Market 4"];
     for i in 0..5 {
         let id = t.client.create_market(
             &t.admin,
-            &String::from_str(&t.env, &format!("Market {}", i)),
+            &String::from_str(&t.env, market_names[i]),
             &String::from_str(&t.env, "https://m.png"),
             &Category::Other,
             &3600_u64,
