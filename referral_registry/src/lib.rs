@@ -3,8 +3,8 @@
 #![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, vec, Address, Env, IntoVal, String,
-    Symbol, Val,
+    contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
+    IntoVal, String, Symbol, Val,
 };
 
 pub const INTERFACE_VERSION: u32 = 1;
@@ -303,7 +303,9 @@ impl ReferralRegistryContract {
     }
 
     pub fn get_display_name(env: Env, user: Address) -> Option<String> {
-        env.storage().persistent().get(&DataKey::DisplayName(user))
+        env.storage()
+            .persistent()
+            .get(&DataKey::DisplayName(user))
     }
 
     pub fn get_referrer_count(env: Env, referrer: Address) -> u32 {

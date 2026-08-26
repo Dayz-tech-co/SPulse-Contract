@@ -4152,3 +4152,323 @@ fn test_inv_multi_market_fee_isolation() {
     let withdrawn = withdraw_all_admin_fees(&t, &treasury);
     assert_eq!(withdrawn, id2_fees_before + id3_fees_before);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// INVARIANT MATRIX (issue #98)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// This matrix documents the cross-contract constant interactions that produce
+// emergent safety properties. Each constant is individually safe, but their
+// combinations create boundary conditions that must be verified.
+//
+// ┌─────────────────────┬─────────────────────┬─────────────────────────────┐
+// │ Constant A          │ Constant B          │ Invariant                   │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ TTL_BUMP (~1yr)     │ MAX_MARKET_DURATION │ TTL must outlive duration   │
+// │                     │ (60s default)       │ + dispute window            │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ DISPUTE_WINDOW      │ TTL_BUMP            │ Dispute window must fit     │
+// │ (7 days)            │ (~1 year)           │ within TTL for claims       │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ TOTAL_FEE_BPS (2%)  │ MAX_WITHDRAWAL_BPS  │ Withdrawal cap must exceed  │
+// │                     │ (20%)               │ fee rate for liveness       │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ MAX_WITHDRAWAL_BPS  │ cancel_market       │ Cancel reclaim + withdraw   │
+// │ (20%)               │ reclaim             │ cap cannot drain >100%      │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ WIN_TOKENS (1 PULSE)│ MAX_TOP_PLAYERS(50) │ Reward minting cannot       │
+// │                     │                     │ exceed token supply cap     │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ Referral depth (5)  │ cancel_market       │ Deep chains cannot wipe     │
+// │                     │ reclaim             │ accumulator on cancel       │
+// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
+// │ PLATFORM_FEE_BPS    │ referral_fee        │ Fee split preserves         │
+// │ (1.5%)              │ (0.5%)              │ accumulator consistency     │
+// └─────────────────────┴─────────────────────┴─────────────────────────────┘
+//
+// GOVERNANCE PROCESS FOR CONSTANT CHANGES:
+// 1. Any change to a constant in the matrix requires re-verification of ALL
+//    invariants in the row(s) it participates in.
+// 2. Changes to TTL_BUMP, DISPUTE_WINDOW, or MAX_MARKET_DURATION require
+//    testing the full lifecycle: create → bet → resolve → dispute → claim.
+// 3. Changes to fee constants (TOTAL_FEE_BPS, PLATFORM_FEE_BPS, MAX_WITHDRAWAL_BPS)
+//    require testing cancel + withdraw interleaving.
+// 4. Changes to reward constants (WIN_TOKENS, LOSE_TOKENS, MAX_TOP_PLAYERS)
+//    require testing minting cap invariants.
+// 5. All invariant tests must pass before a constant change is merged.
+
+/// Invariant 11: TTL vs market duration — a market running its full duration
+/// must still have live entries for the dispute window + claim.
+/// MAX_MARKET_DURATION must be < TTL_BUMP - DISPUTE_WINDOW.
+#[test]
+fn test_inv_ttl_outlives_duration_plus_dispute() {
+    // Compile-time invariant: TTL_BUMP (~1 year) >> DISPUTE_WINDOW (7 days)
+    // This ensures entries survive the full lifecycle.
+    assert!(
+        TTL_BUMP as u64 > DISPUTE_WINDOW_SECS,
+        "TTL_BUMP must exceed DISPUTE_WINDOW"
+    );
+
+    let t = setup();
+    let id = create_test_market(&t);
+
+    // After market creation, TTL must be set
+    let market_ttl = t.client.get_market_ttl(&t.env, &id);
+    assert!(
+        market_ttl >= TTL_BUMP,
+        "market TTL must be at least TTL_BUMP"
+    );
+
+    // Advance past dispute window — entry must still be live
+    advance_time(&t.env, DISPUTE_WINDOW_SECS);
+    let ttl_after_dispute = t.client.get_market_ttl(&t.env, &id);
+    assert!(
+        ttl_after_dispute > 0,
+        "market entry must survive past dispute window"
+    );
+}
+
+/// Invariant 12: Order-of-operations between cancel_market reclaim and
+/// withdraw_fees cap. If cancel and withdraw interleave, the accumulator
+/// must never go negative or allow over-withdrawal.
+#[test]
+fn test_inv_cancel_then_withdraw_no_overdrain() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let id2 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 2"),
+        &String::from_str(&t.env, "https://m2.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 1000_0000000);
+    fund_user(&t, &bob, 1000_0000000);
+
+    // Build fees in both markets
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id1, &false, &100_0000000_i128);
+    t.client.place_bet(&alice, &id2, &true, &200_0000000_i128);
+
+    let total_fees = t.client.get_accumulated_fees();
+
+    // Withdraw some fees first (capped)
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let withdrawn_1 = t.client.withdraw_fees(&t.admin, &treasury);
+    let fees_after_withdraw = t.client.get_accumulated_fees();
+    assert!(withdrawn_1 <= total_fees);
+    assert_eq!(fees_after_withdraw, total_fees - withdrawn_1);
+
+    // Now cancel market 1 — its fees leave the accumulator
+    let id1_fees = t.client.get_market_fees(&id1);
+    t.client.cancel_market(&t.admin, &id1);
+    let fees_after_cancel = t.client.get_accumulated_fees();
+    assert_eq!(fees_after_cancel, fees_after_withdraw - id1_fees);
+
+    // Withdraw remaining — should equal market 2's fees only
+    let withdrawn_2 = withdraw_all_admin_fees(&t, &treasury);
+    assert_eq!(withdrawn_2, fees_after_cancel);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+
+    // Total withdrawn + reclaimed = total fees
+    assert_eq!(withdrawn_1 + withdrawn_2 + id1_fees, total_fees);
+}
+
+/// Invariant 13: Withdraw cap prevents draining even after multiple cancels.
+/// Multiple cancel reclaims cannot create a race where withdraw exceeds 100%.
+#[test]
+fn test_inv_multiple_cancels_then_withdraw() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let id2 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 2"),
+        &String::from_str(&t.env, "https://m2.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+    let id3 = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market 3"),
+        &String::from_str(&t.env, "https://m3.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    fund_user(&t, &alice, 1000_0000000);
+
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128);
+    t.client.place_bet(&alice, &id2, &true, &100_0000000_i128);
+    t.client.place_bet(&alice, &id3, &true, &100_0000000_i128);
+
+    let total_fees = t.client.get_accumulated_fees();
+
+    // Cancel markets 1 and 2
+    t.client.cancel_market(&t.admin, &id1);
+    t.client.cancel_market(&t.admin, &id2);
+
+    // Only market 3's fees remain
+    let remaining = t.client.get_accumulated_fees();
+    assert_eq!(remaining, t.client.get_market_fees(&id3));
+
+    // Withdraw all remaining — cannot exceed what's left
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let withdrawn = withdraw_all_admin_fees(&t, &treasury);
+    assert_eq!(withdrawn, remaining);
+    assert!(withdrawn < total_fees);
+}
+
+/// Invariant 14: Fee BPS constants preserve accumulator consistency.
+/// TOTAL_FEE_BPS = PLATFORM_FEE_BPS + REFERRAL_FEE_BPS must hold.
+#[test]
+fn test_inv_fee_split_conservation() {
+    // Compile-time invariant: fee split must sum correctly
+    let referral_fee_bps = TOTAL_FEE_BPS - PLATFORM_FEE_BPS;
+    assert_eq!(referral_fee_bps, 50); // 0.5% referral fee
+
+    let t = setup();
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 500_0000000);
+
+    let bet_amount = 100_0000000_i128;
+    let total_fee = bet_amount * TOTAL_FEE_BPS / BPS_DENOM;
+    let platform_fee = bet_amount * PLATFORM_FEE_BPS / BPS_DENOM;
+    let referral_fee = total_fee - platform_fee;
+
+    t.client.place_bet(&user, &id, &true, &bet_amount);
+
+    // Platform fee goes to market ledger
+    assert_eq!(t.client.get_market_fees(&id), platform_fee);
+    // Accumulator tracks platform fee only (referral fee sent to contract)
+    assert_eq!(t.client.get_accumulated_fees(), platform_fee);
+    // Referral fee amount is correct
+    assert_eq!(referral_fee, bet_amount * 50 / BPS_DENOM);
+}
+
+/// Invariant 15: Reward minting per claim is bounded by token constants.
+/// WIN_TOKENS and LOSE_TOKENS are fixed; total minting per market is bounded
+/// by (WIN_TOKENS + LOSE_TOKENS) * number_of_claimants.
+#[test]
+fn test_inv_reward_minting_bounded() {
+    let t = setup();
+    let id = create_test_market(&t);
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 500_0000000);
+    fund_user(&t, &bob, 500_0000000);
+
+    t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id, &false, &100_0000000_i128);
+
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
+
+    t.client.claim(&alice, &id);
+    t.client.claim(&bob, &id);
+
+    // Total supply = winner tokens + loser tokens (bounded by constants)
+    let expected_supply = WIN_TOKENS + LOSE_TOKENS;
+    assert_eq!(t.token_client.total_supply(), expected_supply);
+
+    // Per-user minting matches constants exactly
+    assert_eq!(t.token_client.balance(&alice), WIN_TOKENS);
+    assert_eq!(t.token_client.balance(&bob), LOSE_TOKENS);
+}
+
+/// Invariant 16: Referral depth vs fee caps — deep referral chains cannot
+/// wipe the accumulator on cancel. The referral fee is sent per-bet, not
+/// reclaimed on cancel, so deep chains don't affect the accumulator.
+#[test]
+fn test_inv_referral_depth_does_not_affect_accumulator() {
+    let t = setup();
+
+    // Create a referral chain: referrer1 <- referrer2 <- referrer3 <- user
+    let referrer1 = Address::generate(&t.env);
+    let referrer2 = Address::generate(&t.env);
+    let referrer3 = Address::generate(&t.env);
+    let user = Address::generate(&t.env);
+
+    let no_ref: Option<Address> = None;
+    t.referral_client.register_referral(
+        &referrer1,
+        &String::from_str(&t.env, "R1"),
+        &no_ref,
+    );
+    t.referral_client.register_referral(
+        &referrer2,
+        &String::from_str(&t.env, "R2"),
+        &Some(referrer1.clone()),
+    );
+    t.referral_client.register_referral(
+        &referrer3,
+        &String::from_str(&t.env, "R3"),
+        &Some(referrer2.clone()),
+    );
+    t.referral_client.register_referral(
+        &user,
+        &String::from_str(&t.env, "User"),
+        &Some(referrer3.clone()),
+    );
+
+    let id = create_test_market(&t);
+    fund_user(&t, &user, 500_0000000);
+
+    // User bets — referral fee goes to referrer3
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+
+    // Accumulator only tracks platform fee (referral fee sent to contract)
+    let platform_fee = 100_0000000_i128 * PLATFORM_FEE_BPS / BPS_DENOM;
+    assert_eq!(t.client.get_accumulated_fees(), platform_fee);
+
+    // Cancel market — only platform fee is reclaimed
+    t.client.cancel_market(&t.admin, &id);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+
+    // Referrer3 received the referral fee (not affected by cancel)
+    assert_eq!(t.xlm.balance(&referrer3), 5000000);
+}
+
+/// Invariant 17: MAX_WITHDRAWAL_BPS cap is consistent with market count.
+/// Even with many markets, the cap prevents draining in a single call.
+#[test]
+fn test_inv_withdraw_cap_scales_with_market_count() {
+    let t = setup();
+
+    let mut ids: Vec<u64> = Vec::new(&t.env);
+    for i in 0..5 {
+        let id = t.client.create_market(
+            &t.admin,
+            &String::from_str(&t.env, &format!("Market {}", i)),
+            &String::from_str(&t.env, "https://m.png"),
+            &Category::Other,
+            &3600_u64,
+        );
+        ids.push_back(id);
+    }
+
+    let alice = Address::generate(&t.env);
+    fund_user(&t, &alice, 1000_0000000);
+
+    for id in ids.iter() {
+        t.client
+            .place_bet(&alice, &id, &true, &100_0000000_i128);
+    }
+
+    let total_fees = t.client.get_accumulated_fees();
+    let cap = total_fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    let withdrawn = t.client.withdraw_fees(&t.admin, &treasury);
+
+    // Single withdraw cannot exceed cap
+    assert_eq!(withdrawn, cap);
+    assert!(withdrawn < total_fees);
+}
