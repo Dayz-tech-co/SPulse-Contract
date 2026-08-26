@@ -4154,52 +4154,28 @@ fn test_inv_multi_market_fee_isolation() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// INVARIANT MATRIX (issue #98)
+// CROSS-CONTRACT INVARIANT TEST SUITE (issue #98)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// This matrix documents the cross-contract constant interactions that produce
-// emergent safety properties. Each constant is individually safe, but their
-// combinations create boundary conditions that must be verified.
+// This test suite verifies that the combination of constants across all
+// contracts produces safe behavior. Each test exercises a specific invariant
+// that emerges from constant interactions, not from any single constant alone.
 //
-// ┌─────────────────────┬─────────────────────┬─────────────────────────────┐
-// │ Constant A          │ Constant B          │ Invariant                   │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ TTL_BUMP (~1yr)     │ MAX_MARKET_DURATION │ TTL must outlive duration   │
-// │                     │ (60s default)       │ + dispute window            │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ DISPUTE_WINDOW      │ TTL_BUMP            │ Dispute window must fit     │
-// │ (7 days)            │ (~1 year)           │ within TTL for claims       │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ TOTAL_FEE_BPS (2%)  │ MAX_WITHDRAWAL_BPS  │ Withdrawal cap must exceed  │
-// │                     │ (20%)               │ fee rate for liveness       │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ MAX_WITHDRAWAL_BPS  │ cancel_market       │ Cancel reclaim + withdraw   │
-// │ (20%)               │ reclaim             │ cap cannot drain >100%      │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ WIN_TOKENS (1 PULSE)│ MAX_TOP_PLAYERS(50) │ Reward minting cannot       │
-// │                     │                     │ exceed token supply cap     │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ Referral depth (5)  │ cancel_market       │ Deep chains cannot wipe     │
-// │                     │ reclaim             │ accumulator on cancel       │
-// ├─────────────────────┼─────────────────────┼─────────────────────────────┤
-// │ PLATFORM_FEE_BPS    │ referral_fee        │ Fee split preserves         │
-// │ (1.5%)              │ (0.5%)              │ accumulator consistency     │
-// └─────────────────────┴─────────────────────┴─────────────────────────────┘
+// Full invariant matrix is documented in INVARIANT_MATRIX.md at the repository
+// root. This file contains all 17 invariants with their corresponding test
+// names and the constant pairs they exercise.
 //
 // GOVERNANCE PROCESS FOR CONSTANT CHANGES:
-// 1. Any change to a constant in the matrix requires re-verification of ALL
-//    invariants in the row(s) it participates in.
-// 2. Changes to TTL_BUMP, DISPUTE_WINDOW, or MAX_MARKET_DURATION require
-//    testing the full lifecycle: create → bet → resolve → dispute → claim.
-// 3. Changes to fee constants (TOTAL_FEE_BPS, PLATFORM_FEE_BPS, MAX_WITHDRAWAL_BPS)
-//    require testing cancel + withdraw interleaving.
-// 4. Changes to reward constants (WIN_TOKENS, LOSE_TOKENS, MAX_TOP_PLAYERS)
-//    require testing minting cap invariants.
-// 5. All invariant tests must pass before a constant change is merged.
+// 1. Any change to a constant requires re-verification of all invariants
+//    in the row(s) it participates in (see INVARIANT_MATRIX.md).
+// 2. Changes to TTL_BUMP or DISPUTE_WINDOW_SECS require testing the full
+//    lifecycle: create → bet → resolve → dispute → claim.
+// 3. Changes to fee constants require testing cancel + withdraw interleaving.
+// 4. All invariant tests must pass before a constant change is merged.
 
 /// Invariant 11: TTL vs market duration — a market running its full duration
 /// must still have live entries for the dispute window + claim.
-/// MAX_MARKET_DURATION must be < TTL_BUMP - DISPUTE_WINDOW.
+/// TTL_BUMP must exceed DISPUTE_WINDOW_SECS for the full lifecycle.
 #[test]
 fn test_inv_ttl_outlives_duration_plus_dispute() {
     // Compile-time invariant: TTL_BUMP (~1 year) >> DISPUTE_WINDOW (7 days)
