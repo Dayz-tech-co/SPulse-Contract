@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
-    IntoVal, String, Symbol, Vec,
+    IntoVal, String, Symbol, Val, Vec,
 };
 
 pub const INTERFACE_VERSION: u32 = 1;
@@ -142,7 +142,7 @@ impl ReferralRegistryContract {
             return Err(ReferralError::AlreadyRegistered);
         }
 
-        if let Some(ref_addr) = referrer {
+        if let Some(ref_addr) = referrer.clone() {
             if ref_addr == user {
                 return Err(ReferralError::SelfReferral);
             }
@@ -203,10 +203,17 @@ impl ReferralRegistryContract {
         Self::require_market_contract(&env, &caller)?;
         caller.require_auth();
 
+        // The stored value at this key is itself an Option<Address> (see
+        // register_referral's `.set(&key, &referrer)`), so a correct read is
+        // Option<Option<Address>>: outer None means "never registered",
+        // Some(None) means "registered with no referrer". Both collapse to
+        // "no referrer" here, via flatten() -- same double-Option shape
+        // referral_depth already reads correctly below.
         let referrer: Option<Address> = env
             .storage()
             .persistent()
-            .get(&DataKey::Referrer(user.clone()));
+            .get::<_, Option<Address>>(&DataKey::Referrer(user.clone()))
+            .flatten();
 
         match referrer {
             None => {
@@ -254,9 +261,12 @@ impl ReferralRegistryContract {
     }
 
     pub fn get_referrer(env: Env, user: Address) -> Option<Address> {
+        // Same double-Option shape as credit()'s read above -- see its
+        // comment for why flatten() (not a bare .get()) is required here.
         env.storage()
             .persistent()
-            .get(&DataKey::Referrer(user))
+            .get::<_, Option<Address>>(&DataKey::Referrer(user))
+            .flatten()
     }
 
     pub fn get_display_name(env: Env, user: Address) -> Option<String> {
