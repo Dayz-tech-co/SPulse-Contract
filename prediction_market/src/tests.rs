@@ -1222,14 +1222,17 @@ fn test_empty_side_resolution_pool_to_fees() {
     assert_eq!(withdrawn, 1_5000000);
     assert_eq!(t.xlm.balance(&treasury), 1_5000000);
 
-    // Alice claims her net principal plus lose-tier PULSE / points
+    // Alice claims her net principal. Issue #24: not a real win, so no
+    // WIN_TOKENS/WIN_POINTS -- and no LOSE_TOKENS consolation either (see
+    // prediction_market/src/lib.rs's comment by the removed LOSE_TOKENS
+    // constant), plus a LOSE_POINTS *penalty* rather than the pre-fix credit.
     let alice_xlm_before = t.xlm.balance(&alice);
     t.client.claim(&alice, &id);
     let bet = t.client.get_bet(&id, &alice);
     assert!(bet.claimed);
     assert_eq!(t.xlm.balance(&alice), alice_xlm_before + 98_0000000);
-    assert_eq!(t.token_client.balance(&alice), 2_0000000); // LOSE_TOKENS
-    assert_eq!(t.leaderboard_client.get_points(&alice), 10); // LOSE_POINTS
+    assert_eq!(t.token_client.balance(&alice), 0);
+    assert_eq!(t.leaderboard_client.get_points(&alice), 0); // saturates at 0, was never credited
 }
 
 // ── 42. Cancel accumulates fees on multiple bets correctly ────────────────────
@@ -1340,12 +1343,16 @@ fn test_e2e_full_inter_contract_flow() {
     assert_eq!(t.leaderboard_client.get_points(&alice), 35);
     assert_eq!(t.token_client.balance(&alice), 11_0000000);
 
-    // Bob claims as loser
+    // Bob claims as loser. Issue #24: a loss costs points (penalize) rather
+    // than awarding them, with no token consolation -- but the loss is still
+    // recorded as activity (lost_bets), via the same add_pts(0, false) call
+    // every other outcome already used.
     let bob_xlm_before = t.xlm.balance(&bob);
     t.client.claim(&bob, &market_id);
     assert_eq!(t.xlm.balance(&bob), bob_xlm_before);
-    assert_eq!(t.leaderboard_client.get_points(&bob), 10);
-    assert_eq!(t.token_client.balance(&bob), 2_0000000);
+    assert_eq!(t.leaderboard_client.get_points(&bob), 0); // saturates at 0, was never credited
+    assert_eq!(t.token_client.balance(&bob), 0);
+    assert_eq!(t.leaderboard_client.get_stats(&bob).lost_bets, 1);
 
     // Fee withdrawal to a registered treasury address
     let treasury = Address::generate(&t.env);
@@ -2116,9 +2123,14 @@ fn test_set_config_non_governor_rejected() {
 }
 
 fn last_event_name(env: &Env) -> Symbol {
+    // soroban-sdk 26's `events().all()` returns a `ContractEvents` exposed as
+    // an XDR slice, not an indexable Vec<(Address, Vec<Val>, Val)> the way an
+    // older SDK did -- same shape as leaderboard's penalty_tests.rs.
     let events = env.events().all();
-    let last = events.get(events.len() - 1).unwrap();
-    let topic0: Val = last.1.get_unchecked(0);
+    let emitted = events.events();
+    let last = emitted.last().expect("no event was emitted");
+    let soroban_sdk::xdr::ContractEventBody::V0(body) = &last.body;
+    let topic0 = Val::try_from_val(env, &body.topics[0]).unwrap();
     Symbol::try_from_val(env, &topic0).unwrap()
 }
 
@@ -2402,7 +2414,55 @@ fn test_two_sided_loser_does_not_receive_xlm_on_claim() {
     let bob_before = t.xlm.balance(&bob);
     t.client.claim(&bob, &id);
     assert_eq!(t.xlm.balance(&bob), bob_before, "loser must not receive XLM");
-    assert_eq!(t.token_client.balance(&bob), 2_0000000);
+    assert_eq!(t.token_client.balance(&bob), 0);
+}
+
+// Regression test for issue #24: "losers still gain LOSE_POINTS" -- a loss
+// must cost points, not add them. Deliberately uses a player who already has
+// a positive balance from a prior win: starting from 0, "penalized down to
+// 0" and "never credited" are indistinguishable, so that alone can't prove
+// the fix. Points actually moving *down* on a loss is the whole point.
+#[test]
+fn test_loss_penalizes_existing_points_issue_24() {
+    let t = setup();
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 500_0000000);
+    fund_user(&t, &bob, 500_0000000);
+
+    // Market 1: alice wins, banking WIN_POINTS.
+    let id1 = create_test_market(&t);
+    t.client.place_bet(&alice, &id1, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id1, &false, &100_0000000_i128);
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id1, &true);
+    t.client.claim(&alice, &id1);
+    assert_eq!(t.leaderboard_client.get_points(&alice), 30); // WIN_POINTS
+
+    // Market 2: alice loses a genuine two-sided bet (real competition, not
+    // an empty-side edge case already covered elsewhere in this file).
+    let id2 = create_test_market(&t);
+    t.client.place_bet(&alice, &id2, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id2, &false, &100_0000000_i128);
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &false);
+
+    let alice_tokens_before = t.token_client.balance(&alice);
+    t.client.claim(&alice, &id2);
+
+    // The bug this issue describes: before the fix, this loss would have
+    // pushed alice's points UP to 40 (30 + LOSE_POINTS via reward()).
+    // After the fix, it's a real penalty: 30 - LOSE_POINTS(10) = 20.
+    assert_eq!(t.leaderboard_client.get_points(&alice), 20);
+    // No token consolation prize for a loss anymore either (see the removed
+    // LOSE_TOKENS constant's comment in prediction_market/src/lib.rs).
+    assert_eq!(t.token_client.balance(&alice), alice_tokens_before);
+    // The loss is still recorded as activity, exactly like every other
+    // outcome, even though penalize() itself is deliberately
+    // activity-counter-neutral (see leaderboard's penalty_tests.rs).
+    let stats = t.leaderboard_client.get_stats(&alice);
+    assert_eq!(stats.won_bets, 1);
+    assert_eq!(stats.lost_bets, 1);
 }
 
 #[test]
