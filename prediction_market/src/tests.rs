@@ -3386,3 +3386,65 @@ fn test_resolver_cannot_drain_principal_immediately_after_zero_side() {
     t.client.add_fee_recipient(&t.admin, &treasury);
     t.client.withdraw_fees(&t.admin, &treasury);
 }
+
+#[test]
+fn test_issue169_dust_is_swept_not_stranded() {
+    let t = setup();
+    let id = create_test_market(&t);
+
+    let w1 = Address::generate(&t.env);
+    let w2 = Address::generate(&t.env);
+    let w3 = Address::generate(&t.env);
+    fund_user(&t, &w1, 10_000_000_000);
+    fund_user(&t, &w2, 10_000_000_000);
+    fund_user(&t, &w3, 10_000_000_000);
+
+    let l1 = Address::generate(&t.env);
+    fund_user(&t, &l1, 10_000_000_000);
+
+    // Uneven stakes that cannot divide the pool evenly (a loser on NO makes
+    // pool > win, so the floor division leaves a non-zero remainder).
+    t.client.place_bet(&w1, &id, &true, &17_777_779_i128);
+    t.client.place_bet(&w2, &id, &true, &29_999_993_i128);
+    t.client.place_bet(&w3, &id, &true, &41_111_107_i128);
+    t.client.place_bet(&l1, &id, &false, &13_333_331_i128);
+
+    advance_time(&t.env, 3601);
+    let fees_before = t.client.get_accumulated_fees();
+    t.client.resolve_market(&t.admin, &id, &true);
+
+    let market = t.client.get_market(&id);
+    let pool: i128 = market.total_yes + market.total_no;
+    let win: i128 = market.total_yes;
+    assert!(pool > win);
+
+    let n1 = t.client.get_bet(&id, &w1).amount;
+    let n2 = t.client.get_bet(&id, &w2).amount;
+    let n3 = t.client.get_bet(&id, &w3).amount;
+
+    let p1 = (n1 * pool) / win;
+    let p2 = (n2 * pool) / win;
+    let p3 = (n3 * pool) / win;
+    let dust = pool - p1 - p2 - p3;
+    assert!(
+        dust > 0,
+        "test needs a non-zero remainder to prove the sweep"
+    );
+
+    // Dust is deterministic, bounded, and credited to the fee accumulator at
+    // settlement — never stranded in the contract balance.
+    assert_eq!(t.client.get_payout(&id, &w1), p1);
+    assert_eq!(t.client.get_payout(&id, &w2), p2);
+    assert_eq!(t.client.get_payout(&id, &w3), p3);
+    assert_eq!(t.client.get_accumulated_fees(), fees_before + dust);
+
+    // After every claim, the contract balance equals exactly the earned fees
+    // (payouts paid out + dust swept) — the balance invariant holds.
+    let contract = t.client.address.clone();
+    let bal_after_resolve = t.xlm.balance(&contract);
+    assert_eq!(bal_after_resolve, p1 + p2 + p3 + fees_before + dust);
+    t.client.claim(&w1, &id);
+    t.client.claim(&w2, &id);
+    t.client.claim(&w3, &id);
+    assert_eq!(t.xlm.balance(&contract), fees_before + dust);
+}
