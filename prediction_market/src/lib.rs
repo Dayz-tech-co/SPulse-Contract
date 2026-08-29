@@ -535,10 +535,8 @@ impl PredictionMarketContract {
             .instance()
             .set(&DataKey::PinnedHashes, &pending.hashes);
         env.storage().instance().remove(&DataKey::PendingConfig);
-        env.events().publish(
-            (Symbol::new(&env, "cfg_act"), caller),
-            pending.cfg,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "cfg_act"), caller), pending.cfg);
         Ok(())
     }
 
@@ -1654,19 +1652,24 @@ impl PredictionMarketContract {
 
         // Issue #178: total is derived on-the-fly from per-market ledgers +
         // LegacyFees (no stored global counter).
+        // Issue #163: only fees that are EARNED (market settled / swept) may
+        // be withdrawn. Fees of open markets are reserved to back a possible
+        // cancellation refund, so they are excluded from what is withdrawable:
+        // withdrawing them would leave the contract unable to honour
+        // cancel_refund and permanently diverge XLM balance from accounting.
         Self::ensure_fee_ledger_migrated(&env);
-        let fees = Self::compute_total_proven_fees(&env);
-        if fees <= 0 {
+        let earned = Self::withdrawable_fees(&env);
+        if earned <= 0 {
             return Err(MarketError::NoFeesToWithdraw);
         }
         // Issue #57: the admin's instant withdrawal is capped per call so a
         // compromised fee recipient cannot drain the pot at once; provenance
-        // is debited pro-rata (legacy first, then newest markets).
-        let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
-        // When fees are dust (< 5 stroops), cap rounds to 0 via integer
-        // division.  Withdraw the remaining amount directly so callers can
-        // fully drain the accumulator without getting stuck.
-        let amount = if cap > 0 { cap } else { fees };
+        // is debited pro-rata (legacy first, then settled markets).
+        let mut amount = earned * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+        if amount == 0 {
+            // Dust-safety: never trap the tail of the pot behind the cap.
+            amount = earned;
+        }
         Self::debit_proven_fees(&env, amount)?;
 
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
@@ -1677,7 +1680,11 @@ impl PredictionMarketContract {
         );
 
         env.events().publish(
-            (Symbol::new(&env, "fees_withdrawn"), caller, recipient.clone()),
+            (
+                Symbol::new(&env, "fees_withdrawn"),
+                caller,
+                recipient.clone(),
+            ),
             amount,
         );
         Ok(amount)
@@ -1705,19 +1712,23 @@ impl PredictionMarketContract {
             return Err(MarketError::WithdrawalRequestExists);
         }
 
+        // Issue #178: total is derived on-the-fly from per-market ledgers +
+        // LegacyFees (no stored global counter).
+        // Issue #57/#163: only earned fees may be scheduled — the requested
+        // amount is debited immediately from provenance (legacy first, then
+        // settled markets), so pending requests can never double-spend. Fees
+        // of OPEN markets are reserved to back cancellation refunds and are
+        // NOT schedulable (issue #163).
         Self::ensure_fee_ledger_migrated(&env);
-        let fees = Self::compute_total_proven_fees(&env);
-        // Only earned fees may be scheduled (#57): the requested amount is
-        // debited immediately from provenance (legacy first, then newest
-        // markets), so pending requests can never double-spend.
-        if amount > fees {
+        let earned = Self::withdrawable_fees(&env);
+        if amount > earned {
             return Err(MarketError::WithdrawalTooLarge);
         }
         Self::debit_proven_fees(&env, amount)?;
 
         // Cap: a single request may take at most MAX_WITHDRAWAL_BPS of the
         // earned accumulator, so even a compromised recipient cannot drain it fully.
-        let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+        let cap = earned * MAX_WITHDRAWAL_BPS / BPS_DENOM;
         if amount > cap {
             return Err(MarketError::WithdrawalTooLarge);
         }
@@ -2117,7 +2128,11 @@ impl PredictionMarketContract {
 
         let mut remaining = amount;
         let legacy = Self::market_fee_balance(env, LEGACY_MARKET_ID);
-        let take_legacy = if remaining < legacy { remaining } else { legacy };
+        let take_legacy = if remaining < legacy {
+            remaining
+        } else {
+            legacy
+        };
         if take_legacy > 0 {
             Self::debit_market_fees(env, LEGACY_MARKET_ID, take_legacy);
             remaining -= take_legacy;
@@ -2130,11 +2145,20 @@ impl PredictionMarketContract {
                 .unwrap_or(0);
             let mut id = count;
             while remaining > 0 && id > 0 {
-                let mf = Self::market_fee_balance(env, id);
-                if mf > 0 {
-                    let take = if remaining < mf { remaining } else { mf };
-                    Self::debit_market_fees(env, id, take);
-                    remaining -= take;
+                // Skip OPEN markets: their fees are reserved to back a
+                // possible cancellation refund (issue #163) and must never
+                // be drained by a withdrawal.
+                let is_open = match Self::load_market(env, id) {
+                    Ok(m) => !m.resolved && !m.cancelled,
+                    Err(_) => false,
+                };
+                if !is_open {
+                    let mf = Self::market_fee_balance(env, id);
+                    if mf > 0 {
+                        let take = if remaining < mf { remaining } else { mf };
+                        Self::debit_market_fees(env, id, take);
+                        remaining -= take;
+                    }
                 }
                 id -= 1;
             }
@@ -2343,6 +2367,38 @@ impl PredictionMarketContract {
             return Err(MarketError::NotAdmin);
         }
         Ok(())
+    }
+
+    // ── Fee provenance internals (issues #57/#163/#178) ────────────────────
+
+    /// Sum of fees currently held by OPEN markets (not resolved, not
+    /// cancelled). These fees are reserved to back a possible cancellation
+    /// refund (issue #163): a cancelled market returns net + platform to its
+    /// bettors, so withdrawing them while the market is still open would make
+    /// the contract's XLM balance diverge from what cancel_refund owes.
+    fn open_market_fees(env: &Env) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MarketCount)
+            .unwrap_or(0);
+        let mut total: i128 = 0;
+        for id in 1..=count {
+            if let Ok(m) = Self::load_market(env, id) {
+                if !m.resolved && !m.cancelled {
+                    total += Self::market_fee_balance(env, id);
+                }
+            }
+        }
+        total
+    }
+
+    /// Fees that are genuinely withdrawable: the whole derived accumulator
+    /// minus the reserved open-market portion (issues #163 + #178).
+    fn withdrawable_fees(env: &Env) -> i128 {
+        let total = Self::compute_total_proven_fees(env);
+        total.saturating_sub(Self::open_market_fees(env))
     }
 
     fn require_admin_or_resolver(env: &Env, caller: &Address) -> Result<(), MarketError> {

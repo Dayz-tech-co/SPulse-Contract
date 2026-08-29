@@ -2437,7 +2437,9 @@ fn test_refresh_markets_migrates_existing_entries() {
     let market_contract = t.client.address.clone();
     let real_ttl = |id: u64| -> u32 {
         let key = DataKey::Market(id);
-        t.env.as_contract(&market_contract, || t.env.storage().persistent().get_ttl(&key))
+        t.env.as_contract(&market_contract, || {
+            t.env.storage().persistent().get_ttl(&key)
+        })
     };
     let before_a = real_ttl(a);
     let bumped = t.client.refresh_markets(&1_u64, &20_u32);
@@ -3199,6 +3201,13 @@ fn test_admin_withdraw_respects_cap() {
     let fees = t.client.get_accumulated_fees();
     assert_eq!(fees, 4_5000000); // 3 bets x 1.5% platform (referral refunded)
 
+    // Fees of an OPEN market are reserved (issue #163): the admin must not be
+    // able to withdraw them before the market settles.
+    assert!(t.client.try_withdraw_fees(&t.admin, &t.admin).is_err());
+
+    // After resolution the earned pot is subject to the 20%-per-call cap.
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
     let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
     let withdrawn = t.client.withdraw_fees(&t.admin, &t.admin);
     assert_eq!(withdrawn, cap);
@@ -3231,8 +3240,20 @@ fn test_two_step_withdraw_debits_market_ledger() {
     t.client.place_bet(&user, &id, &true, &100_0000000_i128);
     assert_eq!(t.client.get_market_fees(&id), 1_5000000);
 
+    // Fees of an OPEN market are reserved to back a possible cancellation
+    // refund (issue #163) — they must not be schedulable for withdrawal.
     let recipient = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &recipient);
+    assert!(t
+        .client
+        .try_request_withdraw_fees(&recipient, &recipient, &1_0000000)
+        .is_err());
+    assert!(t.client.try_withdraw_fees(&t.admin, &recipient).is_err());
+
+    // After resolution the fees are earned and a two-step withdrawal debits
+    // this market's provenance ledger (legacy first, then settled markets).
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
     let fees = t.client.get_accumulated_fees();
     let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
     t.client.request_withdraw_fees(&recipient, &recipient, &cap);
@@ -3370,20 +3391,93 @@ fn test_reject_freeze_two_sided_market() {
     t.client.freeze_market(&t.admin, &id);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE #163 — cancel_market fee reclaim correctness
+// ═══════════════════════════════════════════════════════════════════════════
+// Regression: fees of OPEN markets are reserved to back a possible
+// cancellation refund; withdrawing them first must never break cancel_refund.
+
 #[test]
-#[should_panic(expected = "Error(Contract, #15)")]
-fn test_resolver_cannot_drain_principal_immediately_after_zero_side() {
+fn test_issue163_open_market_fees_are_reserved_from_withdrawal() {
     let t = setup();
     let id = create_test_market(&t);
     let alice = Address::generate(&t.env);
     fund_user(&t, &alice, 200_0000000);
     t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000);
+
+    // Instant admin withdrawal and two-step requests must both be rejected
+    // while the market is open — the fees back the cancellation refund.
+    let treasury = Address::generate(&t.env);
+    t.client.add_fee_recipient(&t.admin, &treasury);
+    assert!(t.client.try_withdraw_fees(&t.admin, &treasury).is_err());
+    assert!(t
+        .client
+        .try_request_withdraw_fees(&treasury, &treasury, &1_5000000)
+        .is_err());
+
+    // Cancellation still refunds the bettor net + platform in full.
+    t.client.cancel_market(&t.admin, &id);
+    let alice_before = t.xlm.balance(&alice);
+    let refunded = t.client.cancel_refund(&alice, &id);
+    assert_eq!(refunded, 99_5000000); // net 98 + platform 1.5
+    assert_eq!(t.xlm.balance(&alice), alice_before + 99_5000000);
+    assert_eq!(t.client.get_accumulated_fees(), 0);
+}
+
+#[test]
+fn test_issue163_withdraw_after_resolution_then_cancel_other_market() {
+    // Market A resolves (fees earned, withdrawable); market B stays open and
+    // is later cancelled. Withdrawing A's earned fees must not affect B's
+    // reserved fees or B's cancellation refund.
+    let t = setup();
+    let id_a = create_test_market(&t);
+    let id_b = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Market B"),
+        &String::from_str(&t.env, "https://b.png"),
+        &Category::Other,
+        &3600_u64,
+    );
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 200_0000000);
+    fund_user(&t, &bob, 200_0000000);
+    t.client.place_bet(&alice, &id_a, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id_b, &true, &100_0000000_i128);
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
+
+    // Resolve A; only A's 1.5M becomes earned/withdrawable. B's 1.5M stays
+    // reserved.
     advance_time(&t.env, 3601);
-    t.client.resolve_market(&t.admin, &id, &false);
+    t.client.resolve_market(&t.admin, &id_a, &true);
 
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
-    t.client.withdraw_fees(&t.admin, &treasury);
+    // Withdraw exactly once: the cap takes 20% of the EARNED pot, and only
+    // A's fees are earned (1.5M). B's 1.5M are reserved and cannot be
+    // withdrawn. (withdraw_all_admin_fees cannot be used here — it loops on
+    // the TOTAL accumulator, which still includes B's reserved fees.)
+    let earned = t.client.get_accumulated_fees() - 1_5000000;
+    assert_eq!(earned, 1_5000000);
+    let withdrawn = t.client.withdraw_fees(&t.admin, &treasury);
+    let cap = earned * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+    assert_eq!(withdrawn, cap);
+    // The withdrawal came out of A's earned fees only (1.5M - cap taken);
+    // B's reserved 1.5M remain untouched in the accumulator.
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000 - cap);
+
+    // B is cancelled: the bettor still gets net + platform back because B's
+    // fees were never drained.
+    t.client.cancel_market(&t.admin, &id_b);
+    let bob_before = t.xlm.balance(&bob);
+    let refunded = t.client.cancel_refund(&bob, &id_b);
+    assert_eq!(refunded, 99_5000000);
+    assert_eq!(t.xlm.balance(&bob), bob_before + 99_5000000);
+    // B's reserved fees are reclaimed by the cancellation (not left behind),
+    // and A's remaining earned fees stay withdrawable.
+    assert_eq!(t.client.get_accumulated_fees(), 1_5000000 - cap);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3428,7 +3522,10 @@ fn test_per_market_fee_provenance_is_isolated() {
     t.client.cancel_refund(&alice, &id1);
     assert_eq!(t.xlm.balance(&alice), alice_before + 99_5000000);
 
-    // Market 2 fees remain untouched — can be withdrawn.
+    // Market 2 fees remain untouched — once the market settles they are
+    // withdrawable (issue #163 reserves open-market fees).
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &true);
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
     let withdrawn = t.client.withdraw_fees(&t.admin, &treasury);
@@ -3456,6 +3553,12 @@ fn test_withdraw_only_takes_from_per_market_ledgers() {
     t.client.place_bet(&bob, &id2, &true, &100_0000000_i128); // 1.5 XLM
     assert_eq!(t.client.get_accumulated_fees(), 3_0000000);
 
+    // Both markets settle so their fees become earned/withdrawable (issue
+    // #163 reserves open-market fees).
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id1, &true);
+    t.client.resolve_market(&t.admin, &id2, &true);
+
     // Withdraw — debits from per-market ledgers (newest first).
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
@@ -3465,10 +3568,7 @@ fn test_withdraw_only_takes_from_per_market_ledgers() {
     assert_eq!(withdrawn, cap);
 
     // Total should be reduced by exactly the withdrawn amount.
-    assert_eq!(
-        t.client.get_accumulated_fees(),
-        3_0000000 - cap
-    );
+    assert_eq!(t.client.get_accumulated_fees(), 3_0000000 - cap);
 
     // Individual market fees are debited proportionally from per-market ledgers.
     let remaining1 = t.client.get_market_fees(&id1);
@@ -3525,7 +3625,10 @@ fn test_migration_snapshots_and_removes_global_counter() {
             .storage()
             .instance()
             .set(&DataKey::AccumulatedFees, &legacy_amount);
-        t.env.storage().instance().remove(&DataKey::FeeLedgerMigrated);
+        t.env
+            .storage()
+            .instance()
+            .remove(&DataKey::FeeLedgerMigrated);
     });
 
     t.client.migrate_fee_ledger();
@@ -3595,7 +3698,10 @@ fn test_migration_from_existing_per_market_fees() {
             .storage()
             .instance()
             .set(&DataKey::AccumulatedFees, &legacy_amount);
-        t.env.storage().instance().remove(&DataKey::FeeLedgerMigrated);
+        t.env
+            .storage()
+            .instance()
+            .remove(&DataKey::FeeLedgerMigrated);
         // Pre-existing per-market fee from a parallel branch.
         t.env
             .storage()
@@ -3615,7 +3721,10 @@ fn test_migration_from_existing_per_market_fees() {
     assert_eq!(t.client.get_market_fees(&1), market_fees_amount);
 
     // Total is derived on-the-fly: legacy + per-market.
-    assert_eq!(t.client.get_accumulated_fees(), legacy_amount + market_fees_amount);
+    assert_eq!(
+        t.client.get_accumulated_fees(),
+        legacy_amount + market_fees_amount
+    );
 
     // The old AccumulatedFees storage key is removed.
     t.env.as_contract(&t.client.address, || {
@@ -3630,4 +3739,73 @@ fn test_migration_from_existing_per_market_fees() {
         t.client.get_accumulated_fees(),
         legacy_amount + market_fees_amount + 1_5000000
     );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ISSUE #169 — payout rounding dust must never be stranded
+// ═══════════════════════════════════════════════════════════════════════════
+// Settlement-time exact payouts + deterministic dust sweep: the sum of every
+// winner's stored payout plus the swept dust equals the pool exactly, so no
+// rounding dust can accumulate in the contract balance.
+
+#[test]
+fn test_issue169_dust_is_swept_not_stranded() {
+    let t = setup();
+    let id = create_test_market(&t);
+
+    let w1 = Address::generate(&t.env);
+    let w2 = Address::generate(&t.env);
+    let w3 = Address::generate(&t.env);
+    fund_user(&t, &w1, 10_000_000_000);
+    fund_user(&t, &w2, 10_000_000_000);
+    fund_user(&t, &w3, 10_000_000_000);
+
+    let l1 = Address::generate(&t.env);
+    fund_user(&t, &l1, 10_000_000_000);
+
+    // Uneven stakes that cannot divide the pool evenly (a loser on NO makes
+    // pool > win, so the floor division leaves a non-zero remainder).
+    t.client.place_bet(&w1, &id, &true, &17_777_779_i128);
+    t.client.place_bet(&w2, &id, &true, &29_999_993_i128);
+    t.client.place_bet(&w3, &id, &true, &41_111_107_i128);
+    t.client.place_bet(&l1, &id, &false, &13_333_331_i128);
+
+    advance_time(&t.env, 3601);
+    let fees_before = t.client.get_accumulated_fees();
+    t.client.resolve_market(&t.admin, &id, &true);
+
+    let market = t.client.get_market(&id);
+    let pool: i128 = market.total_yes + market.total_no;
+    let win: i128 = market.total_yes;
+    assert!(pool > win);
+
+    let n1 = t.client.get_bet(&id, &w1).amount;
+    let n2 = t.client.get_bet(&id, &w2).amount;
+    let n3 = t.client.get_bet(&id, &w3).amount;
+
+    let p1 = (n1 * pool) / win;
+    let p2 = (n2 * pool) / win;
+    let p3 = (n3 * pool) / win;
+    let dust = pool - p1 - p2 - p3;
+    assert!(
+        dust > 0,
+        "test needs a non-zero remainder to prove the sweep"
+    );
+
+    // Dust is deterministic, bounded, and credited to the fee accumulator at
+    // settlement — never stranded in the contract balance.
+    assert_eq!(t.client.get_payout(&id, &w1), p1);
+    assert_eq!(t.client.get_payout(&id, &w2), p2);
+    assert_eq!(t.client.get_payout(&id, &w3), p3);
+    assert_eq!(t.client.get_accumulated_fees(), fees_before + dust);
+
+    // After every claim, the contract balance equals exactly the earned fees
+    // (payouts paid out + dust swept) — the balance invariant holds.
+    let contract = t.client.address.clone();
+    let bal_after_resolve = t.xlm.balance(&contract);
+    assert_eq!(bal_after_resolve, p1 + p2 + p3 + fees_before + dust);
+    t.client.claim(&w1, &id);
+    t.client.claim(&w2, &id);
+    t.client.claim(&w3, &id);
+    assert_eq!(t.xlm.balance(&contract), fees_before + dust);
 }
