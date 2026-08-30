@@ -19,10 +19,13 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                  "string": "PULSE"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                  "string": "PLSE"
+                },
+                {
+                  "u32": 7
                 }
               ]
             }
@@ -31,8 +34,6 @@
         }
       ]
     ],
-    [],
-    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -40,10 +41,13 @@
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "pause",
+              "function_name": "set_paused",
               "args": [
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "bool": true
                 }
               ]
             }
@@ -52,28 +56,6 @@
         }
       ]
     ],
-    [],
-    [],
-    [
-      [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-        {
-          "function": {
-            "contract_fn": {
-              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "unpause",
-              "args": [
-                {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                }
-              ]
-            }
-          },
-          "sub_invocations": []
-        }
-      ]
-    ],
-    [],
     []
   ],
   "ledger": {
@@ -117,36 +99,24 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "MarketContract"
+                            "symbol": "Decimals"
                           }
                         ]
                       },
                       "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                        "u32": 7
                       }
                     },
                     {
                       "key": {
                         "vec": [
                           {
-                            "symbol": "MinPoints"
+                            "symbol": "Name"
                           }
                         ]
                       },
                       "val": {
-                        "u64": "0"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "MinSlot"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "u32": 0
+                        "string": "PULSE"
                       }
                     },
                     {
@@ -158,55 +128,31 @@
                         ]
                       },
                       "val": {
-                        "bool": false
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "ReferralContract"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TopPlayerCount"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "u32": 0
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TopPlayers"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "bytes": "000000100000000100000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "TopPlayersMigrated"
-                          }
-                        ]
-                      },
-                      "val": {
                         "bool": true
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "Symbol"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "string": "PLSE"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "TotalSupply"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "0"
                       }
                     }
                   ]
@@ -228,26 +174,6 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "801925984706572462"
-                }
-              },
-              "durability": "temporary",
-              "val": "void"
-            }
-          },
-          "ext": "v0"
-        },
-        "live_until": 6311999
-      },
-      {
-        "entry": {
-          "last_modified_ledger_seq": 0,
-          "data": {
-            "contract_data": {
-              "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
-              "key": {
-                "ledger_key_nonce": {
-                  "nonce": "1033654523790656264"
                 }
               },
               "durability": "temporary",

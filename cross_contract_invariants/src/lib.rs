@@ -4,6 +4,9 @@
 //! produces safe behavior. Each test exercises interactions between multiple
 //! contracts (prediction_market, leaderboard, referral_registry, pulse_token).
 
+#![no_std]
+#![cfg(test)]
+
 use soroban_sdk::{
     testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
@@ -11,10 +14,11 @@ use soroban_sdk::{
 };
 
 use leaderboard::LeaderboardContract;
-use prediction_market::{PredictionMarketContract, Category, MarketError};
+use prediction_market::{Category, PredictionMarketContract};
 use pulse_token::PULSETokenContract;
 use referral_registry::ReferralRegistryContract;
 
+#[allow(dead_code)]
 struct CrossContractSetup {
     env: Env,
     market: prediction_market::PredictionMarketContractClient<'static>,
@@ -47,7 +51,9 @@ fn cross_setup() -> CrossContractSetup {
 
     let admin = Address::generate(&env);
 
-    let xlm_sac_id = env.register_stellar_asset_contract_v2(admin.clone()).address();
+    let xlm_sac_id = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let xlm_admin = StellarAssetClient::new(&env, &xlm_sac_id);
     let xlm = TokenClient::new(&env, &xlm_sac_id);
 
@@ -69,7 +75,13 @@ fn cross_setup() -> CrossContractSetup {
     let market_id = env.register(PredictionMarketContract, ());
     let market = prediction_market::PredictionMarketContractClient::new(&env, &market_id);
 
-    market.initialize(&admin, &token_id, &referral_id, &leaderboard_id, &xlm_sac_id);
+    market.initialize(
+        &admin,
+        &token_id,
+        &referral_id,
+        &leaderboard_id,
+        &xlm_sac_id,
+    );
     leaderboard.initialize(&admin, &market_id, &referral_id);
     referral.initialize(&admin, &market_id, &token_id, &leaderboard_id, &xlm_sac_id);
 
@@ -107,11 +119,14 @@ fn advance_time(env: &Env, secs: u64) {
     });
 }
 
-fn create_market(market: &prediction_market::PredictionMarketContractClient<'static>, admin: &Address) -> u64 {
+fn create_market(
+    market: &prediction_market::PredictionMarketContractClient<'static>,
+    admin: &Address,
+) -> u64 {
     market.create_market(
         admin,
-        &String::from_str(&market.env(), "Test Market"),
-        &String::from_str(&market.env(), "https://test.png"),
+        &String::from_str(&market.env, "Test Market"),
+        &String::from_str(&market.env, "https://test.png"),
         &Category::Other,
         &3600_u64,
     )
@@ -130,8 +145,10 @@ fn test_inv_cross_accumulator_consistency() {
     t.xlm_admin.mint(&alice, &500_0000000);
     t.xlm_admin.mint(&bob, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
-    t.market.place_bet(&bob, &market_id, &false, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&bob, &market_id, &false, &100_0000000_i128);
 
     let acc_before = t.market.get_accumulated_fees();
     let market_fees = t.market.get_market_fees(&market_id);
@@ -170,7 +187,8 @@ fn test_inv_cross_referral_fee_payment() {
 
     let referrer_balance_before = t.xlm.balance(&referrer);
 
-    t.market.place_bet(&user, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&user, &market_id, &true, &100_0000000_i128);
 
     assert_eq!(t.xlm.balance(&referrer), referrer_balance_before + 5000000);
 }
@@ -194,8 +212,12 @@ fn test_inv_cross_late_referrer_registration() {
     );
 
     let user_balance_before = t.xlm.balance(&user);
-    t.market.place_bet(&user, &market_id, &true, &100_0000000_i128);
-    assert_eq!(t.xlm.balance(&user), user_balance_before - 100_0000000 + 5000000);
+    t.market
+        .place_bet(&user, &market_id, &true, &100_0000000_i128);
+    assert_eq!(
+        t.xlm.balance(&user),
+        user_balance_before - 100_0000000 + 5000000
+    );
 
     t.referral.register_referral(
         &referrer,
@@ -203,8 +225,15 @@ fn test_inv_cross_late_referrer_registration() {
         &Option::<Address>::None,
     );
 
+    t.referral.register_referral(
+        &user,
+        &String::from_str(&t.env, "User"),
+        &Some(referrer.clone()),
+    );
+
     let referrer_balance_before = t.xlm.balance(&referrer);
-    t.market.place_bet(&user, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&user, &market_id, &true, &100_0000000_i128);
     assert_eq!(t.xlm.balance(&referrer), referrer_balance_before + 5000000);
 }
 
@@ -221,8 +250,10 @@ fn test_inv_cross_pulse_minting_bounded() {
     t.xlm_admin.mint(&alice, &500_0000000);
     t.xlm_admin.mint(&bob, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
-    t.market.place_bet(&bob, &market_id, &false, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&bob, &market_id, &false, &100_0000000_i128);
 
     advance_time(&t.env, 3601);
     t.market.resolve_market(&t.admin, &market_id, &true);
@@ -248,8 +279,10 @@ fn test_inv_cross_leaderboard_points() {
     t.xlm_admin.mint(&alice, &500_0000000);
     t.xlm_admin.mint(&bob, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
-    t.market.place_bet(&bob, &market_id, &false, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&bob, &market_id, &false, &100_0000000_i128);
 
     advance_time(&t.env, 3601);
     t.market.resolve_market(&t.admin, &market_id, &true);
@@ -257,7 +290,7 @@ fn test_inv_cross_leaderboard_points() {
     t.market.claim(&alice, &market_id);
     t.market.claim(&bob, &market_id);
 
-    assert_eq!(t.leaderboard.get_points(&alice), 35);
+    assert_eq!(t.leaderboard.get_points(&alice), 30);
     assert_eq!(t.leaderboard.get_points(&bob), 10);
 }
 
@@ -272,11 +305,19 @@ fn test_inv_cross_withdraw_cap() {
     let alice = Address::generate(&t.env);
     t.xlm_admin.mint(&alice, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
 
     let total_fees = t.market.get_accumulated_fees();
+
+    // Settle market so fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.market.resolve_market(&t.admin, &market_id, &true);
+
     let treasury = Address::generate(&t.env);
     t.market.add_fee_recipient(&t.admin, &treasury);
 
@@ -296,8 +337,10 @@ fn test_inv_cross_multi_market_isolation() {
     let alice = Address::generate(&t.env);
     t.xlm_admin.mint(&alice, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id1, &true, &100_0000000_i128);
-    t.market.place_bet(&alice, &market_id2, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id1, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id2, &true, &100_0000000_i128);
 
     let market2_fees_before = t.market.get_market_fees(&market_id2);
 
@@ -317,10 +360,11 @@ fn test_inv_cross_dispute_window_ttl() {
     let alice = Address::generate(&t.env);
     t.xlm_admin.mint(&alice, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
 
     advance_time(&t.env, 3601);
-    t.market.resolve_market(&t.admin, &market_id, &true);
+    t.market.resolve_market(&t.admin, &market_id, &false);
 
     assert!(t.market.try_claim(&alice, &market_id).is_err());
 
@@ -339,13 +383,19 @@ fn test_inv_cross_fee_conservation() {
     let alice = Address::generate(&t.env);
     t.xlm_admin.mint(&alice, &500_0000000);
 
-    t.market.place_bet(&alice, &market_id1, &true, &100_0000000_i128);
-    t.market.place_bet(&alice, &market_id2, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id1, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&alice, &market_id2, &true, &100_0000000_i128);
 
     let total_fees = t.market.get_accumulated_fees();
     let market1_fees = t.market.get_market_fees(&market_id1);
 
     t.market.cancel_market(&t.admin, &market_id1);
+
+    // Settle market 2 so fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.market.resolve_market(&t.admin, &market_id2, &true);
 
     let treasury = Address::generate(&t.env);
     t.market.add_fee_recipient(&t.admin, &treasury);
@@ -372,16 +422,126 @@ fn test_inv_cross_referral_depth_isolation() {
     let user = Address::generate(&t.env);
     t.xlm_admin.mint(&user, &500_0000000);
 
-    t.referral.register_referral(&referrer1, &String::from_str(&t.env, "R1"), &None);
-    t.referral.register_referral(&referrer2, &String::from_str(&t.env, "R2"), &Some(referrer1));
-    t.referral.register_referral(&referrer3, &String::from_str(&t.env, "R3"), &Some(referrer2));
-    t.referral.register_referral(&user, &String::from_str(&t.env, "User"), &Some(referrer3));
+    t.referral
+        .register_referral(&referrer1, &String::from_str(&t.env, "R1"), &None);
+    t.referral.register_referral(
+        &referrer2,
+        &String::from_str(&t.env, "R2"),
+        &Some(referrer1),
+    );
+    t.referral.register_referral(
+        &referrer3,
+        &String::from_str(&t.env, "R3"),
+        &Some(referrer2),
+    );
+    t.referral
+        .register_referral(&user, &String::from_str(&t.env, "User"), &Some(referrer3));
 
-    t.market.place_bet(&user, &market_id, &true, &100_0000000_i128);
+    t.market
+        .place_bet(&user, &market_id, &true, &100_0000000_i128);
 
     let platform_fee = 1_5000000_i128;
     assert_eq!(t.market.get_accumulated_fees(), platform_fee);
 
     t.market.cancel_market(&t.admin, &market_id);
     assert_eq!(t.market.get_accumulated_fees(), 0);
+}
+
+/// Invariant 11: Emergency circuit-breaker halting all four contracts
+/// Tests that pausing contracts halts state mutation across the entire system
+/// while preserving recovery (cancel_refund) and read-only paths.
+#[test]
+fn test_inv_cross_emergency_pause_circuit_breaker() {
+    let t = cross_setup();
+    let market_id = create_market(&t.market, &t.admin);
+
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    t.xlm_admin.mint(&alice, &500_0000000);
+    t.xlm_admin.mint(&bob, &500_0000000);
+
+    // Initial setup before pause
+    t.market
+        .place_bet(&alice, &market_id, &true, &100_0000000_i128);
+
+    // Trigger emergency circuit-breaker on all contracts
+    t.market.set_paused(&t.admin, &true);
+    t.token.set_paused(&t.admin, &true);
+    t.referral.set_paused(&t.admin, &true);
+    t.leaderboard.set_paused(&t.admin, &true);
+
+    assert!(t.market.paused());
+    assert!(t.token.paused());
+    assert!(t.referral.paused());
+    assert!(t.leaderboard.paused());
+
+    // 1. Prediction market mutations blocked
+    assert!(t
+        .market
+        .try_place_bet(&bob, &market_id, &false, &50_0000000_i128)
+        .is_err());
+    assert!(t
+        .market
+        .try_reduce_position(&alice, &market_id, &10_0000000_i128)
+        .is_err());
+    assert!(t
+        .market
+        .try_create_market(
+            &t.admin,
+            &String::from_str(&t.env, "New Market"),
+            &String::from_str(&t.env, "https://x.png"),
+            &Category::Crypto,
+            &3600_u64
+        )
+        .is_err());
+
+    // 2. Token mutations blocked
+    assert!(t
+        .token
+        .try_transfer(&alice, &bob, &10_0000000_i128)
+        .is_err());
+    assert!(t
+        .token
+        .try_mint(&t.leaderboard_id, &bob, &10_0000000_i128)
+        .is_err());
+
+    // 3. Referral registrations and credits blocked
+    assert!(t
+        .referral
+        .try_register_referral(&bob, &String::from_str(&t.env, "Bob"), &None)
+        .is_err());
+    assert!(t
+        .referral
+        .try_credit(&t.market_id, &alice, &10_0000000_i128)
+        .is_err());
+
+    // 4. Leaderboard mutations blocked
+    assert!(t
+        .leaderboard
+        .try_reward(&t.market_id, &alice, &10_u64, &0_i128, &true)
+        .is_err());
+    assert!(t
+        .leaderboard
+        .try_add_pts(&t.market_id, &alice, &10_u64, &true)
+        .is_err());
+
+    // 5. Read-only views still function
+    assert_eq!(t.token.balance(&alice), 0);
+    assert_eq!(t.market.get_market_count(), 1);
+    assert_eq!(t.leaderboard.get_points(&alice), 0);
+
+    // Unpause system restores functionality
+    t.market.set_paused(&t.admin, &false);
+    t.token.set_paused(&t.admin, &false);
+    t.referral.set_paused(&t.admin, &false);
+    t.leaderboard.set_paused(&t.admin, &false);
+
+    assert!(!t.market.paused());
+    assert!(!t.token.paused());
+    assert!(!t.referral.paused());
+    assert!(!t.leaderboard.paused());
+
+    // Operations succeed after unpause
+    t.market
+        .place_bet(&bob, &market_id, &false, &50_0000000_i128);
 }

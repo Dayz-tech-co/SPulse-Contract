@@ -249,10 +249,35 @@ fn test_interface_version_reported() {
 fn test_pause_unpause_admin_only() {
     let (_env, client, admin, _market, _referral) = setup();
     assert!(!client.is_paused());
+    assert!(!client.paused());
     client.pause(&admin);
     assert!(client.is_paused());
+    assert!(client.paused());
     client.unpause(&admin);
     assert!(!client.is_paused());
+    assert!(!client.paused());
+}
+
+#[test]
+fn test_set_paused_flow() {
+    let (_env, client, admin, _market, _referral) = setup();
+    assert!(!client.paused());
+
+    client.set_paused(&admin, &true);
+    assert!(client.paused());
+    assert!(client.is_paused());
+
+    client.set_paused(&admin, &false);
+    assert!(!client.paused());
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_set_paused_rejects_non_admin() {
+    let (env, client, _admin, _market, _referral) = setup();
+    let not_admin = Address::generate(&env);
+    client.set_paused(&not_admin, &true);
 }
 
 #[test]
@@ -270,6 +295,15 @@ fn test_paused_rejects_add_pts() {
     client.pause(&admin);
     let user = Address::generate(&env);
     client.add_pts(&market, &user, &10_u64, &true);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_paused_rejects_reward() {
+    let (env, client, admin, market, _referral) = setup();
+    client.set_paused(&admin, &true);
+    let user = Address::generate(&env);
+    client.reward(&market, &user, &10_u64, &0_i128, &true);
 }
 
 #[test]

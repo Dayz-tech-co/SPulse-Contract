@@ -221,10 +221,24 @@ impl LeaderboardContract {
         INTERFACE_VERSION
     }
 
+    pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), LeaderboardError> {
+        Self::require_admin(&env, &caller)?;
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        let ev = if paused { "paused" } else { "unpaused" };
+        env.events().publish((Symbol::new(&env, ev), caller), true);
+        Ok(())
+    }
+
+    pub fn paused(env: Env) -> bool {
+        Self::is_paused(env)
+    }
+
     /// Halt point/reward accrual in an emergency. Admin only. Views keep working.
     pub fn pause(env: Env, admin: Address) -> Result<(), LeaderboardError> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "paused"), admin), true);
         Ok(())
@@ -234,6 +248,7 @@ impl LeaderboardContract {
     pub fn unpause(env: Env, admin: Address) -> Result<(), LeaderboardError> {
         Self::require_admin(&env, &admin)?;
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "unpaused"), admin), true);
         Ok(())
