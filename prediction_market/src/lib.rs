@@ -64,7 +64,7 @@ const LOSE_TOKENS: i128 = 2_0000000;
 // accumulator to an arbitrary address in one call.
 const WITHDRAW_DELAY_SECS: u64 = 86_400; // 24h timelock between request and payout
 const MAX_WITHDRAWAL_BPS: i128 = 2_000; // per-request cap: 20% of accumulated fees
-const CONFIG_DELAY_SECS: u64 = 86_400; // issue #51: dispute window before Config is live
+const CONFIG_DELAY_SECS: u64 = 604_800; // Issue #173: 7-day timelock (1 day was too short to detect a compromised governor)
 const MAX_GOVERNORS: u32 = 10;
 
 // Issue #93: config changes are staged and only take effect after
@@ -545,13 +545,38 @@ impl PredictionMarketContract {
             return Err(MarketError::WasmHashMismatch);
         }
 
+        // Read the old config before overwriting, for the event.
+        let old_cfg: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Cfg)
+            .expect("Cfg must be set before execute_set_config");
+
         env.storage().instance().set(&DataKey::Cfg, &pending.cfg);
         env.storage()
             .instance()
             .set(&DataKey::PinnedHashes, &pending.hashes);
         env.storage().instance().remove(&DataKey::PendingConfig);
-        env.events()
-            .publish((Symbol::new(&env, "cfg_act"), caller), pending.cfg);
+        env.events().publish(
+            (Symbol::new(&env, "cfg_act"), caller.clone()),
+            pending.cfg.clone(),
+        );
+        // Issue #173: emit ConfigChanged with old/new addresses for
+        // off-chain monitoring. Critical for detecting a compromised
+        // governor silently re-pointing contracts.
+        env.events().publish(
+            (Symbol::new(&env, "config_changed"), caller),
+            (
+                old_cfg.token,
+                old_cfg.referral,
+                old_cfg.leaderboard,
+                old_cfg.xlm_sac,
+                pending.cfg.token,
+                pending.cfg.referral,
+                pending.cfg.leaderboard,
+                pending.cfg.xlm_sac,
+            ),
+        );
         Ok(())
     }
 
