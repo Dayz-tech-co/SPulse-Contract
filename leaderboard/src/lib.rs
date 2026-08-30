@@ -37,8 +37,9 @@ const DECAY_ZERO_AFTER_PERIODS: u32 = TTL_HIGH / DECAY_PERIOD_LEDGERS;
 // Issue #84: bump whenever a function signature, argument order, or return
 // type that a caller relies on changes.
 pub const INTERFACE_VERSION: u32 = 1;
-// pulse_token ABI version reward()/reward_bonus() were built against.
-const EXPECTED_TOKEN_INTERFACE_VERSION: u32 = 1;
+// Issue #170: expected token ABI version now stored in instance storage.
+// The governor updates it via set_token_contract when upgrading pulse_token.
+const DEFAULT_TOKEN_INTERFACE_VERSION: u32 = 1;
 
 #[contracterror]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
@@ -80,6 +81,8 @@ pub enum DataKey {
     StatsEpoch(Address),
     // Pull-based reward queue (issue #86).
     PendingReward(Address),
+    // Issue #170: runtime-configurable expected token interface version.
+    ExpectedTokenVersion,
     // Issue #20: permanently flagged addresses. Every accrual path checks this
     // key and returns PlayerBanned if present.
     BannedPlayer(Address),
@@ -202,8 +205,9 @@ impl LeaderboardContract {
         env: Env,
         admin: Address,
         token: Address,
+        expected_version: u32,
     ) -> Result<(), LeaderboardError> {
-        Self::write_token_contract(&env, &admin, &token)
+        Self::write_token_contract(&env, &admin, &token, expected_version)
     }
 
     /// Permissionless one-shot migration: sorts any legacy unsorted TopPlayerAt
@@ -829,6 +833,7 @@ impl LeaderboardContract {
         env: &Env,
         admin: &Address,
         token: &Address,
+        expected_version: u32,
     ) -> Result<(), LeaderboardError> {
         let stored: Address = env
             .storage()
@@ -848,7 +853,15 @@ impl LeaderboardContract {
     fn require_compatible_token(env: &Env, token: &Address) -> Result<(), LeaderboardError> {
         let version: u32 =
             env.invoke_contract(token, &Symbol::new(env, "interface_version"), vec![&env]);
-        if version != EXPECTED_TOKEN_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage instead of
+        // a compile-time constant, so the governor can update it when upgrading
+        // pulse_token.
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::ExpectedTokenVersion)
+            .unwrap_or(DEFAULT_TOKEN_INTERFACE_VERSION);
+        if version != expected {
             return Err(LeaderboardError::IncompatibleInterface);
         }
         Ok(())

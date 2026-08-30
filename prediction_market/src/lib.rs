@@ -87,9 +87,12 @@ pub const INTERFACE_VERSION: u32 = 1;
 // against. A deployed dependency reporting a different version may have a
 // changed credit/reward ABI — refuse the call rather than invoke blind
 // (issue #84).
-const EXPECTED_REFERRAL_INTERFACE_VERSION: u32 = 1;
-const EXPECTED_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
-
+// Issue #170: expected referral/leaderboard ABI versions are now stored in
+// instance storage (part of Config) instead of compile-time constants.
+// The governor must update them alongside address changes via set_config.
+// Keeping the compile-time constants as fallback defaults for fresh deploys.
+const DEFAULT_REFERRAL_INTERFACE_VERSION: u32 = 1;
+const DEFAULT_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -207,6 +210,10 @@ pub struct Config {
     pub referral: Address,
     pub leaderboard: Address,
     pub xlm_sac: Address,
+    /// Issue #170: runtime-configurable expected interface versions.
+    /// Governor must set these alongside address changes to prevent ABI mismatch.
+    pub expected_referral_version: u32,
+    pub expected_leaderboard_version: u32,
 }
 
 // Issue #93: emitted when set_config stages a change, so off-chain indexers
@@ -354,6 +361,9 @@ impl PredictionMarketContract {
                 referral: referral_contract.clone(),
                 leaderboard: leaderboard_contract.clone(),
                 xlm_sac: xlm_sac.clone(),
+                // Issue #170: initialise expected interface versions to defaults.
+                expected_referral_version: DEFAULT_REFERRAL_INTERFACE_VERSION,
+                expected_leaderboard_version: DEFAULT_LEADERBOARD_INTERFACE_VERSION,
             },
         );
         env.storage().instance().set(&DataKey::MarketCount, &0_u64);
@@ -431,6 +441,8 @@ impl PredictionMarketContract {
         referral_contract: Address,
         leaderboard_contract: Address,
         xlm_sac: Address,
+        expected_referral_version: u32,
+        expected_leaderboard_version: u32,
     ) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
@@ -453,6 +465,8 @@ impl PredictionMarketContract {
                 referral: referral_contract,
                 leaderboard: leaderboard_contract,
                 xlm_sac,
+                expected_referral_version,
+                expected_leaderboard_version,
             },
             hashes,
             requested_at: env.ledger().timestamp(),
@@ -2372,7 +2386,16 @@ impl PredictionMarketContract {
     fn require_compatible_referral(env: &Env, referral: &Address) -> Result<(), MarketError> {
         let version: u32 =
             env.invoke_contract(referral, &Symbol::new(env, "interface_version"), vec![env]);
-        if version != EXPECTED_REFERRAL_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        // instead of a compile-time constant, so the governor can update it
+        // when upgrading the referral contract.
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_referral_version)
+            .unwrap_or(DEFAULT_REFERRAL_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
         }
         Ok(())
@@ -2384,7 +2407,14 @@ impl PredictionMarketContract {
             &Symbol::new(env, "interface_version"),
             vec![env],
         );
-        if version != EXPECTED_LEADERBOARD_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_leaderboard_version)
+            .unwrap_or(DEFAULT_LEADERBOARD_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
         }
         Ok(())
