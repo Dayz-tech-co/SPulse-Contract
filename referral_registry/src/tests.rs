@@ -85,6 +85,13 @@ fn setup() -> TestSetup {
 }
 
 #[test]
+fn test_initialize() {
+    let t = setup();
+    assert_eq!(t.client.interface_version(), 1);
+    assert!(!t.client.is_paused());
+}
+
+#[test]
 fn test_register_referral_without_referrer() {
     let t = setup();
     let user = Address::generate(&t.env);
@@ -327,4 +334,12 @@ fn test_pause_unpause() {
         &Option::<Address>::None,
     );
     assert_eq!(t.client.get_referrer(&user), None);
+}
+
+#[test]
+fn test_set_token_contract() {
+    let t = setup();
+    let new_token = Address::generate(&t.env);
+
+    t.client.set_token_contract(&t.admin, &new_token);
 }
