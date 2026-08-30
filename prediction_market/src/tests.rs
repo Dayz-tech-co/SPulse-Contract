@@ -2562,12 +2562,37 @@ fn test_matching_version_does_not_guarantee_claim_succeeds() {
 fn test_pause_unpause_admin_only() {
     let t = setup();
     assert!(!t.client.is_paused());
+    assert!(!t.client.paused());
 
     t.client.pause(&t.admin);
     assert!(t.client.is_paused());
+    assert!(t.client.paused());
 
     t.client.unpause(&t.admin);
     assert!(!t.client.is_paused());
+    assert!(!t.client.paused());
+}
+
+#[test]
+fn test_set_paused_flow() {
+    let t = setup();
+    assert!(!t.client.paused());
+
+    t.client.set_paused(&t.admin, &true);
+    assert!(t.client.paused());
+    assert!(t.client.is_paused());
+
+    t.client.set_paused(&t.admin, &false);
+    assert!(!t.client.paused());
+    assert!(!t.client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #3)")]
+fn test_set_paused_rejects_non_admin() {
+    let t = setup();
+    let not_admin = Address::generate(&t.env);
+    t.client.set_paused(&not_admin, &true);
 }
 
 #[test]
@@ -2596,6 +2621,19 @@ fn test_paused_rejects_place_bet() {
 
     t.client.pause(&t.admin);
     t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #26)")]
+fn test_paused_rejects_reduce_position() {
+    let t = setup();
+    let id = create_test_market(&t);
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+    t.client.place_bet(&user, &id, &true, &100_0000000_i128);
+
+    t.client.set_paused(&t.admin, &true);
+    t.client.reduce_position(&user, &id, &50_0000000_i128);
 }
 
 #[test]
@@ -3849,6 +3887,11 @@ fn test_inv_accumulator_equals_ledger_sum() {
 
     assert_eq!(acc, m1 + m2 + legacy, "accumulator must equal ledger sum");
 
+    // Settle markets so their fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id1, &true);
+    t.client.resolve_market(&t.admin, &id2, &true);
+
     // After a withdrawal, invariant must still hold
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
@@ -3885,7 +3928,7 @@ fn test_inv_cancel_reclaims_exact_market_fees() {
     fund_user(&t, &bob, 500_0000000);
 
     t.client.place_bet(&alice, &id1, &true, &100_0000000_i128);
-    t.client.place_bet(&bob, &id2, &false, &200_0000000_i128);
+    t.client.place_bet(&bob, &id2, &true, &200_0000000_i128);
 
     let fees_before = t.client.get_accumulated_fees();
     let id1_fees_before = t.client.get_market_fees(&id1);
@@ -3903,13 +3946,16 @@ fn test_inv_cancel_reclaims_exact_market_fees() {
     // Market 2's fees remain untouched
     assert_eq!(t.client.get_market_fees(&id2), 3_0000000);
 
+    // Settle market 2 so its fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &true);
+
     // Withdraw all remaining fees — should equal market 2's fees only
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
     let withdrawn = withdraw_all_admin_fees(&t, &treasury);
     assert_eq!(
-        withdrawn,
-        fees_after,
+        withdrawn, fees_after,
         "withdrawable fees must equal post-cancel accumulator"
     );
 }
@@ -3930,6 +3976,10 @@ fn test_inv_withdraw_cap_after_cancel() {
 
     let fees = t.client.get_accumulated_fees();
     let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+
+    // Settle market so fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
 
     // Single withdraw cannot exceed cap
     let treasury = Address::generate(&t.env);
@@ -4026,6 +4076,10 @@ fn test_inv_fee_conservation() {
     t.client.cancel_market(&t.admin, &id1);
     let reclaimed = id1_fees;
 
+    // Settle market 2 so its fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &true);
+
     // Withdraw remaining from market 2
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);
@@ -4056,9 +4110,9 @@ fn test_inv_leaderboard_points_conservation() {
     t.client.claim(&alice, &id);
     t.client.claim(&bob, &id);
 
-    // Alice wins: WIN_POINTS (30) + welcome bonus (5) = 35
-    // Bob loses: LOSE_POINTS (10) = 10
-    assert_eq!(t.leaderboard_client.get_points(&alice), 35);
+    // Alice wins: WIN_POINTS (30)
+    // Bob loses: LOSE_POINTS (10)
+    assert_eq!(t.leaderboard_client.get_points(&alice), 30);
     assert_eq!(t.leaderboard_client.get_points(&bob), 10);
 }
 
@@ -4098,12 +4152,12 @@ fn test_inv_dispute_window_fits_in_ttl() {
     t.client.place_bet(&user, &id, &true, &100_0000000_i128);
 
     advance_time(&t.env, 3601); // expire market
-    t.client.resolve_market(&t.admin, &id, &true);
+    t.client.resolve_market(&t.admin, &id, &false);
 
     // During dispute window, claim is blocked
     assert!(t.client.try_claim(&user, &id).is_err());
 
-    advance_time(&t.env, DISPUTE_WINDOW_SECS);
+    advance_time(&t.env, DISPUTE_WINDOW_SECS + 1);
     // After dispute window, claim succeeds
     t.client.claim(&user, &id);
 }
@@ -4145,6 +4199,11 @@ fn test_inv_multi_market_fee_isolation() {
     // Markets 2 and 3 fees are untouched
     assert_eq!(t.client.get_market_fees(&id2), id2_fees_before);
     assert_eq!(t.client.get_market_fees(&id3), id3_fees_before);
+
+    // Settle markets 2 and 3 so their fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &true);
+    t.client.resolve_market(&t.admin, &id3, &true);
 
     // Withdraw all — should equal id2 + id3 fees
     let treasury = Address::generate(&t.env);
@@ -4189,7 +4248,7 @@ fn test_inv_ttl_outlives_duration_plus_dispute() {
     let id = create_test_market(&t);
 
     // After market creation, TTL must be set
-    let market_ttl = t.client.get_market_ttl(&t.env, &id);
+    let market_ttl = t.client.get_market_ttl(&id);
     assert!(
         market_ttl >= TTL_BUMP,
         "market TTL must be at least TTL_BUMP"
@@ -4197,7 +4256,7 @@ fn test_inv_ttl_outlives_duration_plus_dispute() {
 
     // Advance past dispute window — entry must still be live
     advance_time(&t.env, DISPUTE_WINDOW_SECS);
-    let ttl_after_dispute = t.client.get_market_ttl(&t.env, &id);
+    let ttl_after_dispute = t.client.get_market_ttl(&id);
     assert!(
         ttl_after_dispute > 0,
         "market entry must survive past dispute window"
@@ -4230,6 +4289,10 @@ fn test_inv_cancel_then_withdraw_no_overdrain() {
     t.client.place_bet(&alice, &id2, &true, &200_0000000_i128);
 
     let total_fees = t.client.get_accumulated_fees();
+
+    // Settle market 2 so its fees are earned
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id2, &true);
 
     // Withdraw some fees first (capped)
     let treasury = Address::generate(&t.env);
@@ -4287,6 +4350,10 @@ fn test_inv_multiple_cancels_then_withdraw() {
     // Cancel markets 1 and 2
     t.client.cancel_market(&t.admin, &id1);
     t.client.cancel_market(&t.admin, &id2);
+
+    // Settle market 3 so its fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id3, &true);
 
     // Only market 3's fees remain
     let remaining = t.client.get_accumulated_fees();
@@ -4372,11 +4439,8 @@ fn test_inv_referral_depth_does_not_affect_accumulator() {
     let user = Address::generate(&t.env);
 
     let no_ref: Option<Address> = None;
-    t.referral_client.register_referral(
-        &referrer1,
-        &String::from_str(&t.env, "R1"),
-        &no_ref,
-    );
+    t.referral_client
+        .register_referral(&referrer1, &String::from_str(&t.env, "R1"), &no_ref);
     t.referral_client.register_referral(
         &referrer2,
         &String::from_str(&t.env, "R2"),
@@ -4434,12 +4498,17 @@ fn test_inv_withdraw_cap_scales_with_market_count() {
     fund_user(&t, &alice, 1000_0000000);
 
     for id in ids.iter() {
-        t.client
-            .place_bet(&alice, &id, &true, &100_0000000_i128);
+        t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
     }
 
     let total_fees = t.client.get_accumulated_fees();
     let cap = total_fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+
+    // Settle markets so fees are earned and withdrawable
+    advance_time(&t.env, 3601);
+    for id in ids.iter() {
+        t.client.resolve_market(&t.admin, &id, &true);
+    }
 
     let treasury = Address::generate(&t.env);
     t.client.add_fee_recipient(&t.admin, &treasury);

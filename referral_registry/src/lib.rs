@@ -3,8 +3,8 @@
 #![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, token, vec, Address, Env,
-    IntoVal, String, Symbol, Val,
+    contract, contracterror, contractimpl, contracttype, token, vec, Address, Env, IntoVal, String,
+    Symbol, Val,
 };
 
 pub const INTERFACE_VERSION: u32 = 1;
@@ -93,10 +93,25 @@ impl ReferralRegistryContract {
         INTERFACE_VERSION
     }
 
+    pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), ReferralError> {
+        Self::require_admin(&env, &caller)?;
+        caller.require_auth();
+        env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        let ev = if paused { "paused" } else { "unpaused" };
+        env.events().publish((Symbol::new(&env, ev), caller), true);
+        Ok(())
+    }
+
+    pub fn paused(env: Env) -> bool {
+        Self::is_paused(env)
+    }
+
     pub fn pause(env: Env, admin: Address) -> Result<(), ReferralError> {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "paused"), admin), true);
         Ok(())
@@ -106,6 +121,7 @@ impl ReferralRegistryContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "unpaused"), admin), true);
         Ok(())
@@ -303,9 +319,7 @@ impl ReferralRegistryContract {
     }
 
     pub fn get_display_name(env: Env, user: Address) -> Option<String> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::DisplayName(user))
+        env.storage().persistent().get(&DataKey::DisplayName(user))
     }
 
     pub fn get_referrer_count(env: Env, referrer: Address) -> u32 {

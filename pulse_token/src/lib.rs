@@ -244,9 +244,8 @@ impl PULSETokenContract {
         Ok(())
     }
 
-    /// Issue #95 circuit breaker: pause all supply-changing operations while
+    /// Issue #95 circuit breaker: pause state-mutating operations while
     /// an emergency is handled. The caller must be the admin; idempotent.
-    /// Transfers/allowances stay available so user funds are never locked.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), TokenError> {
         let admin: Address = Self::require_admin(&env)?;
         if caller != admin {
@@ -255,6 +254,8 @@ impl PULSETokenContract {
         caller.require_auth();
         env.storage().instance().set(&DataKey::Paused, &paused);
         Self::bump_instance_ttl(&env);
+        let ev = if paused { "paused" } else { "unpaused" };
+        env.events().publish((Symbol::new(&env, ev), caller), true);
         Ok(())
     }
 
@@ -336,8 +337,7 @@ impl PULSETokenContract {
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) -> Result<(), TokenError> {
-        // Deliberately NOT pause-gated: holders must always be able to move
-        // their own funds, even while mint/burn are halted (issue #95).
+        Self::require_not_paused(&env)?;
         if amount <= 0 {
             return Err(TokenError::InvalidAmount);
         }
@@ -364,6 +364,7 @@ impl PULSETokenContract {
         amount: i128,
         expiration_ledger: u32,
     ) -> Result<(), TokenError> {
+        Self::require_not_paused(&env)?;
         if amount < 0 {
             return Err(TokenError::InvalidAmount);
         }

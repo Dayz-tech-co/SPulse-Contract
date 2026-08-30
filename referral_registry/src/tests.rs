@@ -8,6 +8,7 @@ use soroban_sdk::{
 use leaderboard::LeaderboardContract;
 use pulse_token::PULSETokenContract;
 
+#[allow(dead_code)]
 struct TestSetup {
     env: Env,
     client: ReferralRegistryContractClient<'static>,
@@ -317,6 +318,7 @@ fn test_pause_unpause() {
 
     t.client.pause(&t.admin);
     assert!(t.client.is_paused());
+    assert!(t.client.paused());
 
     let result = t.client.try_register_referral(
         &user,
@@ -327,6 +329,7 @@ fn test_pause_unpause() {
 
     t.client.unpause(&t.admin);
     assert!(!t.client.is_paused());
+    assert!(!t.client.paused());
 
     t.client.register_referral(
         &user,
@@ -334,6 +337,38 @@ fn test_pause_unpause() {
         &Option::<Address>::None,
     );
     assert_eq!(t.client.get_referrer(&user), None);
+}
+
+#[test]
+fn test_set_paused_flow() {
+    let t = setup();
+    assert!(!t.client.paused());
+
+    t.client.set_paused(&t.admin, &true);
+    assert!(t.client.paused());
+    assert!(t.client.is_paused());
+
+    let user = Address::generate(&t.env);
+    let reg_result = t.client.try_register_referral(
+        &user,
+        &String::from_str(&t.env, "User"),
+        &Option::<Address>::None,
+    );
+    assert!(reg_result.is_err());
+
+    let cred_result = t.client.try_credit(&t.market, &user, &100_i128);
+    assert!(cred_result.is_err());
+
+    t.client.set_paused(&t.admin, &false);
+    assert!(!t.client.paused());
+}
+
+#[test]
+fn test_set_paused_rejects_non_admin() {
+    let t = setup();
+    let rando = Address::generate(&t.env);
+    let result = t.client.try_set_paused(&rando, &true);
+    assert!(result.is_err());
 }
 
 #[test]

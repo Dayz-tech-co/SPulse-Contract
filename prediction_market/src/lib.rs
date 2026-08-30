@@ -49,9 +49,10 @@ const LEGACY_MARKET_ID: u64 = 0;
 //   total_fee = amount - net = ceil(amount * 0.02)
 // (TOTAL fee rate is effectively 200 bps — split into 150 bps platform and
 // the remainder referral once the platform share is resolved.)
-const PLATFORM_FEE_BPS: i128 = 150;
-const BPS_DENOM: i128 = 10_000;
-const NET_NUMERATOR: i128 = 9_800;
+pub const TOTAL_FEE_BPS: i128 = 200;
+pub const PLATFORM_FEE_BPS: i128 = 150;
+pub const BPS_DENOM: i128 = 10_000;
+pub const NET_NUMERATOR: i128 = 9_800;
 
 const WIN_POINTS: u64 = 30;
 const LOSE_POINTS: u64 = 10;
@@ -636,23 +637,23 @@ impl PredictionMarketContract {
     // ── Emergency circuit breaker (issue #95) ───────────────────────────────
 
     /// Halt (or resume) all risk-creating, settlement and withdrawal
-    /// operations: place_bet, create_market, resolve_market, cancel_market,
-    /// withdraw_fees, request_withdraw_fees and execute_withdraw_fees are
-    /// blocked while paused. User recovery paths — claim() and
-    /// cancel_refund() — stay available on purpose, so an emergency pause
-    /// never locks user funds in the contract. Admin only; idempotent.
+    /// operations: place_bet, create_market, reduce_position, resolve_market,
+    /// cancel_market, withdraw_fees, request_withdraw_fees and execute_withdraw_fees
+    /// are blocked while paused. User recovery paths — cancel_refund() — stay
+    /// available on purpose, so an emergency pause never locks user funds in the contract.
+    /// Admin only; idempotent.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), MarketError> {
         Self::require_admin(&env, &caller)?;
         caller.require_auth();
         env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        let ev = if paused { "paused" } else { "unpaused" };
+        env.events().publish((Symbol::new(&env, ev), caller), true);
         Ok(())
     }
 
     pub fn paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get::<_, bool>(&DataKey::Paused)
-            .unwrap_or(false)
+        Self::is_paused(env)
     }
 
     fn require_not_paused(env: &Env) -> Result<(), MarketError> {
@@ -709,6 +710,7 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "paused"), admin), true);
         Ok(())
@@ -718,6 +720,7 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events()
             .publish((Symbol::new(&env, "unpaused"), admin), true);
         Ok(())
@@ -1052,6 +1055,7 @@ impl PredictionMarketContract {
         market_id: u64,
         amount: i128,
     ) -> Result<i128, MarketError> {
+        Self::require_not_paused(&env)?;
         user.require_auth();
 
         if amount <= 0 {
