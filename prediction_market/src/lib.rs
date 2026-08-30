@@ -1404,9 +1404,10 @@ impl PredictionMarketContract {
     }
 
     pub fn get_forfeited_pool(env: Env, market_id: u64) -> Option<ForfeitedPool> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ForfeitedPool(market_id))
+        let key = DataKey::ForfeitedPool(market_id);
+        let val: Option<ForfeitedPool> = env.storage().persistent().get(&key);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     // ── Cancellation ──────────────────────────────────────────────────────
@@ -1834,16 +1835,27 @@ impl PredictionMarketContract {
     // ── View Functions ────────────────────────────────────────────────────
 
     pub fn get_market(env: Env, market_id: u64) -> Result<Market, MarketError> {
-        Self::load_market(&env, market_id)
+        let mkt = Self::load_market(&env, market_id)?;
+        // Issue #166: extend TTL on read so claimable state cannot expire
+        // while a user is inspecting it.
+        let mkt_key = DataKey::Market(market_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        Ok(mkt)
     }
 
     // OPT: returns Bet (ABI-compatible) derived from BetEntry
     pub fn get_bet(env: Env, market_id: u64, user: Address) -> Result<Bet, MarketError> {
+        let bet_key = DataKey::Bet(market_id, user);
         let e: BetEntry = env
             .storage()
             .persistent()
-            .get(&DataKey::Bet(market_id, user))
+            .get(&bet_key)
             .ok_or(MarketError::NoBetFound)?;
+        // Issue #166: extend TTL on read so claimable bet data cannot expire
+        // while a user is inspecting it.
+        env.storage().persistent().extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
         Ok(Bet {
             amount: e.net_yes.max(e.net_no),
             is_yes: e.net_yes >= e.net_no,
@@ -1981,10 +1993,14 @@ impl PredictionMarketContract {
     }
 
     pub fn get_payout(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
+        let key = DataKey::Payout(market_id, user);
+        let val: i128 = env
+            .storage()
             .persistent()
-            .get(&DataKey::Payout(market_id, user))
-            .unwrap_or(0)
+            .get(&key)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     // Fee provenance views (issue #57)
@@ -1992,7 +2008,13 @@ impl PredictionMarketContract {
     /// cached global sum, so a cancel or withdraw on another market cannot
     /// change this value.
     pub fn get_market_fees(env: Env, market_id: u64) -> i128 {
-        Self::market_fee_balance(&env, market_id)
+        let fees = Self::market_fee_balance(&env, market_id);
+        // Issue #166: extend TTL on read so fee ledger data cannot expire.
+        if market_id != LEGACY_MARKET_ID {
+            let key = DataKey::MarketFees(market_id);
+            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
+        fees
     }
 
     /// Unattributed pre-upgrade balance. `market_id == 0` in the ledger.
@@ -2011,19 +2033,27 @@ impl PredictionMarketContract {
     }
 
     pub fn get_user_bet_count(env: Env, market_id: u64, user: Address) -> u32 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: u32 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.count)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     pub fn get_bet_gross(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: i128 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.gross)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────

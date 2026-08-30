@@ -465,13 +465,22 @@ impl LeaderboardContract {
     /// Points as of *now*, with decay applied (issue #69). A read — it never
     /// writes the decayed value back; the next accrual does that.
     pub fn get_points(env: Env, user: Address) -> u64 {
-        Self::decayed_stats(&env, &user).points
+        let pts = Self::decayed_stats(&env, &user).points;
+        // Issue #166: extend TTL on read so idle player stats cannot expire
+        // while a user is checking their score.
+        let key = DataKey::Stats(user);
+        env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        pts
     }
 
     /// Stats as of *now*. `points` carries decay; activity counters are
     /// lifetime totals and are deliberately left alone.
     pub fn get_stats(env: Env, user: Address) -> PlayerStats {
-        Self::decayed_stats(&env, &user)
+        let stats = Self::decayed_stats(&env, &user);
+        // Issue #166: extend TTL on read so idle player stats cannot expire.
+        let key = DataKey::Stats(user);
+        env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        stats
     }
 
     /// 1-based rank inside the top list, computed on decayed values. Players
