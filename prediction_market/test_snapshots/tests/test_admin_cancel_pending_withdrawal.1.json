@@ -1656,18 +1656,6 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "AccumulatedFees"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "15000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
                             "symbol": "Admin"
                           }
                         ]
@@ -1755,6 +1743,18 @@
                       },
                       "val": {
                         "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "LegacyFees"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "3000000"
                       }
                     },
                     {

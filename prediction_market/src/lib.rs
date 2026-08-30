@@ -175,7 +175,6 @@ pub enum DataKey {
     RateWindowSeq, // (u32 window_start_seq, u32 count) — ledger-sequence anchored (issue #56)
     // ── Settlement-time payouts (issue #2) ───────────────────────────────
     Payout(u64, Address), // i128 — exact payout computed at resolve time
-    // ── Fee provenance (issue #4): per-market sub-ledger ──────────────────
     // ── Fee provenance (issue #57): per-market earned fees ───────────────────────
     MarketFees(u64),   // i128 — genuine earned fees for this market
     LegacyFees,        // i128 — unattributed pre-migration balance
@@ -357,9 +356,9 @@ impl PredictionMarketContract {
             },
         );
         env.storage().instance().set(&DataKey::MarketCount, &0_u64);
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &0_i128);
+        // Issue #178: no stored AccumulatedFees counter — total proven fees
+        // are always derived from per-market ledgers + LegacyFees.
+        env.storage().instance().set(&DataKey::LegacyFees, &0_i128);
         env.storage()
             .instance()
             .set(&DataKey::FeeLedgerMigrated, &true);
@@ -1293,17 +1292,12 @@ impl PredictionMarketContract {
             debug_assert!(dust >= 0, "payouts must never exceed the pool");
         }
 
-        // Read fresh: the zero-side branch may have debited locked fees out
-        // of the accumulator (ForfeitedPool), so never use a stale local.
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees += dust;
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
+        // Sweep the deterministic remainder into this market's fee ledger
+        // (issue #47/#178): Σ payouts + dust == total_pool, no trapped funds,
+        // and fees are per-market so withdraw_fees never touches other markets.
+        if dust > 0 {
+            Self::credit_market_fees(&env, market_id, dust);
+        }
 
         market.resolved = true;
         market.outcome = outcome;
@@ -1315,6 +1309,8 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        // Issue #178: no stored global counter — total is always derived.
+        let acc_fees = Self::compute_total_proven_fees(&env);
         env.events().publish(
             (Symbol::new(&env, "market_resolved"), caller, market_id),
             (outcome, total_pool, acc_fees),
@@ -1429,19 +1425,21 @@ impl PredictionMarketContract {
         env.storage().persistent().set(&mkt_key, &market);
         let _ = Self::refresh_market_keys(&env, market_id);
 
-        // Reclaim this market's remaining provenance-ledger balance (the
-        // genuine earned-but-unsettled fees it retained) so a cancelled
-        // market cannot leave withdrawable phantom fees behind (#57).
+        // Issue #178: reclaim the full per-market ledger balance.
+        // Each market's fee ledger is isolated, so the balance only contains
+        // fees earned from bets on this market (plus any pre-migration dust),
+        // and a cancelled market cannot leave withdrawable phantom fees (#57).
         let reclaim = Self::market_fee_balance(&env, market_id);
-        Self::debit_market_fees(&env, market_id, reclaim);
+        if reclaim > 0 {
+            Self::debit_market_fees(&env, market_id, reclaim);
+        }
 
         // The market is cancelled and refunded in full — its fee ledger is
         // dropped above.
 
-        let net_pool = market.total_yes + market.total_no;
         env.events().publish(
             (Symbol::new(&env, "market_cancelled"), admin, market_id),
-            net_pool,
+            reclaim,
         );
         Ok(())
     }
@@ -1627,6 +1625,10 @@ impl PredictionMarketContract {
     // caller, the admin, or a registered fee recipient. Fee recipients must
     // use the timelocked request_withdraw_fees -> execute_withdraw_fees flow,
     // which is also capped so the accumulator can never be drained at once.
+    //
+    // Issue #178: total proven fees are derived on-the-fly from per-market
+    // ledgers + LegacyFees (no stored global counter). Admin instant withdraw
+    // is capped per call (MAX_WITHDRAWAL_BPS) like the timelocked path.
 
     pub fn withdraw_fees(
         env: Env,
@@ -1648,11 +1650,14 @@ impl PredictionMarketContract {
             return Err(MarketError::NoFeesToWithdraw);
         }
 
-        // Only fees that are EARNED (market settled / swept) may be withdrawn.
-        // Fees of open markets are reserved to back a possible cancellation
-        // refund, so they are excluded from what is withdrawable (issue #163):
+        // Issue #178: total is derived on-the-fly from per-market ledgers +
+        // LegacyFees (no stored global counter).
+        // Issue #163: only fees that are EARNED (market settled / swept) may
+        // be withdrawn. Fees of open markets are reserved to back a possible
+        // cancellation refund, so they are excluded from what is withdrawable:
         // withdrawing them would leave the contract unable to honour
         // cancel_refund and permanently diverge XLM balance from accounting.
+        Self::ensure_fee_ledger_migrated(&env);
         let earned = Self::withdrawable_fees(&env);
         if earned <= 0 {
             return Err(MarketError::NoFeesToWithdraw);
@@ -1707,11 +1712,14 @@ impl PredictionMarketContract {
             return Err(MarketError::WithdrawalRequestExists);
         }
 
-        // Only earned fees may be scheduled (#57/#163): the requested amount
-        // is debited immediately from provenance (legacy first, then settled
-        // markets), so pending requests can never double-spend. Fees of OPEN
-        // markets are reserved to back cancellation refunds and are NOT
-        // schedulable (issue #163).
+        // Issue #178: total is derived on-the-fly from per-market ledgers +
+        // LegacyFees (no stored global counter).
+        // Issue #57/#163: only earned fees may be scheduled — the requested
+        // amount is debited immediately from provenance (legacy first, then
+        // settled markets), so pending requests can never double-spend. Fees
+        // of OPEN markets are reserved to back cancellation refunds and are
+        // NOT schedulable (issue #163).
+        Self::ensure_fee_ledger_migrated(&env);
         let earned = Self::withdrawable_fees(&env);
         if amount > earned {
             return Err(MarketError::WithdrawalTooLarge);
@@ -1808,16 +1816,12 @@ impl PredictionMarketContract {
             .ok_or(MarketError::NoWithdrawalRequest)?;
         env.storage().persistent().remove(&key);
 
-        // Refund the recorded amount back to the accumulator: the request no
-        // longer exists, so those fees are withdrawable again.
-        let acc: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &(acc + req.amount));
+        // Refund the recorded amount back to the fee provenance ledger: the
+        // request no longer exists, so those fees are withdrawable again.
+        // The amount was debited at request time (issue #57 provenance), so
+        // cancel restores it into LegacyFees (issue #178: totals are derived
+        // from per-market ledgers + LegacyFees, no global counter).
+        Self::credit_market_fees(&env, LEGACY_MARKET_ID, req.amount);
         env.events()
             .publish((Symbol::new(&env, "withdraw_cancelled"), admin), caller);
         Ok(())
@@ -1905,10 +1909,7 @@ impl PredictionMarketContract {
     }
 
     pub fn get_accumulated_fees(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0)
+        Self::compute_total_proven_fees(&env)
     }
 
     /// Remaining TTL (ledgers) of the Market key. 0 means missing/expired —
@@ -2022,6 +2023,151 @@ impl PredictionMarketContract {
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────
+
+    /// Snapshot the pre-upgrade AccumulatedFees scalar into LegacyFees,
+    /// then remove the stale global counter. After migration, total proven
+    /// fees are always derived on-the-fly from per-market ledgers + LegacyFees
+    /// (issue #178).
+    fn ensure_fee_ledger_migrated(env: &Env) {
+        if env.storage().instance().has(&DataKey::FeeLedgerMigrated) {
+            return;
+        }
+        // Snapshot the old global scalar into LegacyFees.
+        let acc: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccumulatedFees)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::LegacyFees, &acc);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeLedgerMigrated, &true);
+        // Remove stale global counter — no longer the source of truth.
+        env.storage().instance().remove(&DataKey::AccumulatedFees);
+    }
+
+    fn market_fee_balance(env: &Env, market_id: u64) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        if market_id == LEGACY_MARKET_ID {
+            env.storage()
+                .instance()
+                .get(&DataKey::LegacyFees)
+                .unwrap_or(0)
+        } else {
+            env.storage()
+                .persistent()
+                .get(&DataKey::MarketFees(market_id))
+                .unwrap_or(0)
+        }
+    }
+
+    fn set_market_fee_balance(env: &Env, market_id: u64, amount: i128) {
+        if market_id == LEGACY_MARKET_ID {
+            env.storage().instance().set(&DataKey::LegacyFees, &amount);
+        } else {
+            let key = DataKey::MarketFees(market_id);
+            env.storage().persistent().set(&key, &amount);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
+    }
+
+    /// Issue #178: compute total proven fees on-the-fly from per-market
+    /// ledgers + LegacyFees. No stored global counter is used.
+    fn compute_total_proven_fees(env: &Env) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        let legacy: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LegacyFees)
+            .unwrap_or(0);
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MarketCount)
+            .unwrap_or(0);
+        let mut total = legacy;
+        let mut id = count;
+        while id > 0 {
+            total += Self::market_fee_balance(env, id);
+            id -= 1;
+        }
+        total
+    }
+
+    fn credit_market_fees(env: &Env, market_id: u64, amount: i128) {
+        if amount <= 0 {
+            return;
+        }
+        Self::ensure_fee_ledger_migrated(env);
+        let next = Self::market_fee_balance(env, market_id) + amount;
+        Self::set_market_fee_balance(env, market_id, next);
+    }
+
+    fn debit_market_fees(env: &Env, market_id: u64, amount: i128) {
+        if amount <= 0 {
+            return;
+        }
+        let bal = Self::market_fee_balance(env, market_id);
+        let take = if amount < bal { amount } else { bal };
+        Self::set_market_fee_balance(env, market_id, bal - take);
+    }
+
+    /// Drain LegacyFees first, then per-market balances from newest to oldest.
+    /// Used by withdraw paths.
+    fn debit_proven_fees(env: &Env, amount: i128) -> Result<(), MarketError> {
+        Self::ensure_fee_ledger_migrated(env);
+        if amount <= 0 {
+            return Err(MarketError::InvalidAmount);
+        }
+        let acc = Self::compute_total_proven_fees(env);
+        if amount > acc {
+            return Err(MarketError::WithdrawalTooLarge);
+        }
+
+        let mut remaining = amount;
+        let legacy = Self::market_fee_balance(env, LEGACY_MARKET_ID);
+        let take_legacy = if remaining < legacy {
+            remaining
+        } else {
+            legacy
+        };
+        if take_legacy > 0 {
+            Self::debit_market_fees(env, LEGACY_MARKET_ID, take_legacy);
+            remaining -= take_legacy;
+        }
+        if remaining > 0 {
+            let count: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::MarketCount)
+                .unwrap_or(0);
+            let mut id = count;
+            while remaining > 0 && id > 0 {
+                // Skip OPEN markets: their fees are reserved to back a
+                // possible cancellation refund (issue #163) and must never
+                // be drained by a withdrawal.
+                let is_open = match Self::load_market(env, id) {
+                    Ok(m) => !m.resolved && !m.cancelled,
+                    Err(_) => false,
+                };
+                if !is_open {
+                    let mf = Self::market_fee_balance(env, id);
+                    if mf > 0 {
+                        let take = if remaining < mf { remaining } else { mf };
+                        Self::debit_market_fees(env, id, take);
+                        remaining -= take;
+                    }
+                }
+                id -= 1;
+            }
+        }
+        if remaining > 0 {
+            return Err(MarketError::WithdrawalTooLarge);
+        }
+        Ok(())
+    }
 
     fn sac_sentinel(env: &Env) -> BytesN<32> {
         BytesN::from_array(env, &[0u8; 32])
@@ -2223,22 +2369,7 @@ impl PredictionMarketContract {
         Ok(())
     }
 
-    // ── Fee provenance internals (issue #57) ──────────────────────────────
-
-    fn ensure_fee_ledger_migrated(env: &Env) {
-        if env.storage().instance().has(&DataKey::FeeLedgerMigrated) {
-            return;
-        }
-        let acc: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        env.storage().instance().set(&DataKey::LegacyFees, &acc);
-        env.storage()
-            .instance()
-            .set(&DataKey::FeeLedgerMigrated, &true);
-    }
+    // ── Fee provenance internals (issues #57/#163/#178) ────────────────────
 
     /// Sum of fees currently held by OPEN markets (not resolved, not
     /// cancelled). These fees are reserved to back a possible cancellation
@@ -2263,124 +2394,11 @@ impl PredictionMarketContract {
         total
     }
 
-    /// Fees that are genuinely withdrawable: the whole accumulator minus the
-    /// reserved open-market portion (issue #163).
+    /// Fees that are genuinely withdrawable: the whole derived accumulator
+    /// minus the reserved open-market portion (issues #163 + #178).
     fn withdrawable_fees(env: &Env) -> i128 {
-        let fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        fees.saturating_sub(Self::open_market_fees(env))
-    }
-
-    fn market_fee_balance(env: &Env, market_id: u64) -> i128 {
-        Self::ensure_fee_ledger_migrated(env);
-        if market_id == LEGACY_MARKET_ID {
-            env.storage()
-                .instance()
-                .get(&DataKey::LegacyFees)
-                .unwrap_or(0)
-        } else {
-            env.storage()
-                .persistent()
-                .get(&DataKey::MarketFees(market_id))
-                .unwrap_or(0)
-        }
-    }
-
-    fn set_market_fee_balance(env: &Env, market_id: u64, amount: i128) {
-        if market_id == LEGACY_MARKET_ID {
-            env.storage().instance().set(&DataKey::LegacyFees, &amount);
-        } else {
-            let key = DataKey::MarketFees(market_id);
-            env.storage().persistent().set(&key, &amount);
-            env.storage()
-                .persistent()
-                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
-        }
-    }
-
-    fn credit_market_fees(env: &Env, market_id: u64, amount: i128) {
-        if amount <= 0 {
-            return;
-        }
-        Self::ensure_fee_ledger_migrated(env);
-        let next = Self::market_fee_balance(env, market_id) + amount;
-        Self::set_market_fee_balance(env, market_id, next);
-        let acc: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &(acc + amount));
-    }
-
-    /// Debit `amount` of earned fees from provenance: the unattributed legacy
-    /// balance first, then per-market ledgers newest-first. Reverts with
-    /// WithdrawalTooLarge if provenance cannot fully cover the amount.
-    fn debit_proven_fees(env: &Env, amount: i128) -> Result<(), MarketError> {
-        let mut remaining = amount;
-        let legacy = Self::market_fee_balance(env, LEGACY_MARKET_ID);
-        let take_legacy = if remaining < legacy {
-            remaining
-        } else {
-            legacy
-        };
-        if take_legacy > 0 {
-            Self::debit_market_fees(env, LEGACY_MARKET_ID, take_legacy);
-            remaining -= take_legacy;
-        }
-        if remaining > 0 {
-            let count: u64 = env
-                .storage()
-                .instance()
-                .get(&DataKey::MarketCount)
-                .unwrap_or(0);
-            let mut id = count;
-            while remaining > 0 && id > 0 {
-                // Skip OPEN markets: their fees are reserved to back a
-                // possible cancellation refund (issue #163) and must never
-                // be drained by a withdrawal.
-                let is_open = match Self::load_market(env, id) {
-                    Ok(m) => !m.resolved && !m.cancelled,
-                    Err(_) => false,
-                };
-                if !is_open {
-                    let mf = Self::market_fee_balance(env, id);
-                    if mf > 0 {
-                        let take = if remaining < mf { remaining } else { mf };
-                        Self::debit_market_fees(env, id, take);
-                        remaining -= take;
-                    }
-                }
-                id -= 1;
-            }
-        }
-        if remaining > 0 {
-            return Err(MarketError::WithdrawalTooLarge);
-        }
-        Ok(())
-    }
-
-    fn debit_market_fees(env: &Env, market_id: u64, amount: i128) {
-        if amount <= 0 {
-            return;
-        }
-        let bal = Self::market_fee_balance(env, market_id);
-        let take = if amount < bal { amount } else { bal };
-        Self::set_market_fee_balance(env, market_id, bal - take);
-        let acc: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        let next_acc = if take < acc { acc - take } else { 0 };
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &next_acc);
+        let total = Self::compute_total_proven_fees(env);
+        total.saturating_sub(Self::open_market_fees(env))
     }
 
     fn require_admin_or_resolver(env: &Env, caller: &Address) -> Result<(), MarketError> {
