@@ -303,37 +303,35 @@ impl ReferralRegistryContract {
     }
 
     pub fn get_referrer(env: Env, user: Address) -> Option<Address> {
-        // The stored value is itself an Option<Address> (Referrer(user) is
-        // written even for a no-referrer registration, to distinguish
-        // "registered with no referrer" from "never registered" for the
-        // has() check in register_referral). Reading it back typed as bare
-        // Address instead of Option<Address> tries to decode a Void
-        // (the no-referrer case) as an Address and panics with
-        // ConversionError -- read the actual stored shape and flatten the
-        // two independent Option layers (key-presence, stored value) into
-        // the one the caller cares about.
-        env.storage()
+        let key = DataKey::Referrer(user);
+        let val: Option<Address> = env
+            .storage()
             .persistent()
-            .get::<_, Option<Address>>(&DataKey::Referrer(user))
-            .flatten()
+            .get::<_, Option<Address>>(&key)
+            .flatten();
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     pub fn get_display_name(env: Env, user: Address) -> Option<String> {
-        env.storage().persistent().get(&DataKey::DisplayName(user))
+        let key = DataKey::DisplayName(user);
+        let val: Option<String> = env.storage().persistent().get(&key);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     pub fn get_referrer_count(env: Env, referrer: Address) -> u32 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ReferrerCount(referrer))
-            .unwrap_or(0)
+        let key = DataKey::ReferrerCount(referrer);
+        let val: u32 = env.storage().persistent().get(&key).unwrap_or(0);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     pub fn get_earnings(env: Env, referrer: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Earnings(referrer))
-            .unwrap_or(0)
+        let key = DataKey::Earnings(referrer);
+        let val: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     fn require_admin(env: &Env, admin: &Address) -> Result<(), ReferralError> {
@@ -359,6 +357,14 @@ impl ReferralRegistryContract {
         }
         Ok(())
     }
+    fn bump_if_present(env: &Env, key: &DataKey) {
+        if env.storage().persistent().has(key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(key, TTL_BUMP, TTL_HIGH);
+        }
+    }
+
 
     fn require_market_contract(env: &Env, caller: &Address) -> Result<(), ReferralError> {
         let market: Address = env

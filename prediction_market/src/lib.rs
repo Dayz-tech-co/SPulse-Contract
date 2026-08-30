@@ -64,7 +64,7 @@ const LOSE_TOKENS: i128 = 2_0000000;
 // accumulator to an arbitrary address in one call.
 const WITHDRAW_DELAY_SECS: u64 = 86_400; // 24h timelock between request and payout
 const MAX_WITHDRAWAL_BPS: i128 = 2_000; // per-request cap: 20% of accumulated fees
-const CONFIG_DELAY_SECS: u64 = 86_400; // issue #51: dispute window before Config is live
+const CONFIG_DELAY_SECS: u64 = 604_800; // Issue #173: 7-day timelock (1 day was too short to detect a compromised governor)
 const MAX_GOVERNORS: u32 = 10;
 
 // Issue #93: config changes are staged and only take effect after
@@ -87,9 +87,12 @@ pub const INTERFACE_VERSION: u32 = 1;
 // against. A deployed dependency reporting a different version may have a
 // changed credit/reward ABI — refuse the call rather than invoke blind
 // (issue #84).
-const EXPECTED_REFERRAL_INTERFACE_VERSION: u32 = 1;
-const EXPECTED_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
-
+// Issue #170: expected referral/leaderboard ABI versions are now stored in
+// instance storage (part of Config) instead of compile-time constants.
+// The governor must update them alongside address changes via set_config.
+// Keeping the compile-time constants as fallback defaults for fresh deploys.
+const DEFAULT_REFERRAL_INTERFACE_VERSION: u32 = 1;
+const DEFAULT_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -207,6 +210,10 @@ pub struct Config {
     pub referral: Address,
     pub leaderboard: Address,
     pub xlm_sac: Address,
+    /// Issue #170: runtime-configurable expected interface versions.
+    /// Governor must set these alongside address changes to prevent ABI mismatch.
+    pub expected_referral_version: u32,
+    pub expected_leaderboard_version: u32,
 }
 
 // Issue #93: emitted when set_config stages a change, so off-chain indexers
@@ -354,6 +361,9 @@ impl PredictionMarketContract {
                 referral: referral_contract.clone(),
                 leaderboard: leaderboard_contract.clone(),
                 xlm_sac: xlm_sac.clone(),
+                // Issue #170: initialise expected interface versions to defaults.
+                expected_referral_version: DEFAULT_REFERRAL_INTERFACE_VERSION,
+                expected_leaderboard_version: DEFAULT_LEADERBOARD_INTERFACE_VERSION,
             },
         );
         env.storage().instance().set(&DataKey::MarketCount, &0_u64);
@@ -431,6 +441,8 @@ impl PredictionMarketContract {
         referral_contract: Address,
         leaderboard_contract: Address,
         xlm_sac: Address,
+        expected_referral_version: u32,
+        expected_leaderboard_version: u32,
     ) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
@@ -453,6 +465,8 @@ impl PredictionMarketContract {
                 referral: referral_contract,
                 leaderboard: leaderboard_contract,
                 xlm_sac,
+                expected_referral_version,
+                expected_leaderboard_version,
             },
             hashes,
             requested_at: env.ledger().timestamp(),
@@ -531,13 +545,38 @@ impl PredictionMarketContract {
             return Err(MarketError::WasmHashMismatch);
         }
 
+        // Read the old config before overwriting, for the event.
+        let old_cfg: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Cfg)
+            .expect("Cfg must be set before execute_set_config");
+
         env.storage().instance().set(&DataKey::Cfg, &pending.cfg);
         env.storage()
             .instance()
             .set(&DataKey::PinnedHashes, &pending.hashes);
         env.storage().instance().remove(&DataKey::PendingConfig);
-        env.events()
-            .publish((Symbol::new(&env, "cfg_act"), caller), pending.cfg);
+        env.events().publish(
+            (Symbol::new(&env, "cfg_act"), caller.clone()),
+            pending.cfg.clone(),
+        );
+        // Issue #173: emit ConfigChanged with old/new addresses for
+        // off-chain monitoring. Critical for detecting a compromised
+        // governor silently re-pointing contracts.
+        env.events().publish(
+            (Symbol::new(&env, "config_changed"), caller),
+            (
+                old_cfg.token,
+                old_cfg.referral,
+                old_cfg.leaderboard,
+                old_cfg.xlm_sac,
+                pending.cfg.token,
+                pending.cfg.referral,
+                pending.cfg.leaderboard,
+                pending.cfg.xlm_sac,
+            ),
+        );
         Ok(())
     }
 
@@ -1404,9 +1443,10 @@ impl PredictionMarketContract {
     }
 
     pub fn get_forfeited_pool(env: Env, market_id: u64) -> Option<ForfeitedPool> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::ForfeitedPool(market_id))
+        let key = DataKey::ForfeitedPool(market_id);
+        let val: Option<ForfeitedPool> = env.storage().persistent().get(&key);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     // ── Cancellation ──────────────────────────────────────────────────────
@@ -1834,16 +1874,27 @@ impl PredictionMarketContract {
     // ── View Functions ────────────────────────────────────────────────────
 
     pub fn get_market(env: Env, market_id: u64) -> Result<Market, MarketError> {
-        Self::load_market(&env, market_id)
+        let mkt = Self::load_market(&env, market_id)?;
+        // Issue #166: extend TTL on read so claimable state cannot expire
+        // while a user is inspecting it.
+        let mkt_key = DataKey::Market(market_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        Ok(mkt)
     }
 
     // OPT: returns Bet (ABI-compatible) derived from BetEntry
     pub fn get_bet(env: Env, market_id: u64, user: Address) -> Result<Bet, MarketError> {
+        let bet_key = DataKey::Bet(market_id, user);
         let e: BetEntry = env
             .storage()
             .persistent()
-            .get(&DataKey::Bet(market_id, user))
+            .get(&bet_key)
             .ok_or(MarketError::NoBetFound)?;
+        // Issue #166: extend TTL on read so claimable bet data cannot expire
+        // while a user is inspecting it.
+        env.storage().persistent().extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
         Ok(Bet {
             amount: e.net_yes.max(e.net_no),
             is_yes: e.net_yes >= e.net_no,
@@ -1981,10 +2032,14 @@ impl PredictionMarketContract {
     }
 
     pub fn get_payout(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
+        let key = DataKey::Payout(market_id, user);
+        let val: i128 = env
+            .storage()
             .persistent()
-            .get(&DataKey::Payout(market_id, user))
-            .unwrap_or(0)
+            .get(&key)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     // Fee provenance views (issue #57)
@@ -1992,7 +2047,13 @@ impl PredictionMarketContract {
     /// cached global sum, so a cancel or withdraw on another market cannot
     /// change this value.
     pub fn get_market_fees(env: Env, market_id: u64) -> i128 {
-        Self::market_fee_balance(&env, market_id)
+        let fees = Self::market_fee_balance(&env, market_id);
+        // Issue #166: extend TTL on read so fee ledger data cannot expire.
+        if market_id != LEGACY_MARKET_ID {
+            let key = DataKey::MarketFees(market_id);
+            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
+        fees
     }
 
     /// Unattributed pre-upgrade balance. `market_id == 0` in the ledger.
@@ -2011,19 +2072,27 @@ impl PredictionMarketContract {
     }
 
     pub fn get_user_bet_count(env: Env, market_id: u64, user: Address) -> u32 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: u32 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.count)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     pub fn get_bet_gross(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: i128 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.gross)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────
@@ -2342,7 +2411,16 @@ impl PredictionMarketContract {
     fn require_compatible_referral(env: &Env, referral: &Address) -> Result<(), MarketError> {
         let version: u32 =
             env.invoke_contract(referral, &Symbol::new(env, "interface_version"), vec![env]);
-        if version != EXPECTED_REFERRAL_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        // instead of a compile-time constant, so the governor can update it
+        // when upgrading the referral contract.
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_referral_version)
+            .unwrap_or(DEFAULT_REFERRAL_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
         }
         Ok(())
@@ -2354,7 +2432,14 @@ impl PredictionMarketContract {
             &Symbol::new(env, "interface_version"),
             vec![env],
         );
-        if version != EXPECTED_LEADERBOARD_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_leaderboard_version)
+            .unwrap_or(DEFAULT_LEADERBOARD_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
         }
         Ok(())
