@@ -158,6 +158,9 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -1249,6 +1252,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "ExpectedTokenVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "MarketContract"
                           }
                         ]
@@ -1967,6 +1982,22 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "expected_leaderboard_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "expected_referral_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "leaderboard"
                             },
                             "val": {
@@ -2058,6 +2089,18 @@
                       },
                       "val": {
                         "u64": "1"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "OpenMarketCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {

@@ -66,7 +66,7 @@ fn setup() -> TestSetup {
     leaderboard_client.initialize(&admin, &market, &referral_id);
     client.initialize(&admin, &market, &token_id, &leaderboard_id, &xlm_sac_id);
 
-    leaderboard_client.set_token_contract(&admin, &token_id);
+    leaderboard_client.set_token_contract(&admin, &token_id, &1_u32);
     token_client.set_minter(&leaderboard_id);
     token_client.set_minter(&referral_id);
     token_client.set_minter(&market);

@@ -158,6 +158,9 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -273,6 +276,12 @@
                 },
                 {
                   "address": "CBEPDNVYXQGWB5YUBXKJWYJA7OXTZW5LFLNO5JRRGE6Z6C5OSUZPCCEL"
+                },
+                {
+                  "u32": 1
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -869,6 +878,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "ExpectedTokenVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "MarketContract"
                           }
                         ]
@@ -1132,6 +1153,22 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "expected_leaderboard_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "expected_referral_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "leaderboard"
                             },
                             "val": {
@@ -1253,6 +1290,22 @@
                             },
                             "val": {
                               "map": [
+                                {
+                                  "key": {
+                                    "symbol": "expected_leaderboard_version"
+                                  },
+                                  "val": {
+                                    "u32": 1
+                                  }
+                                },
+                                {
+                                  "key": {
+                                    "symbol": "expected_referral_version"
+                                  },
+                                  "val": {
+                                    "u32": 1
+                                  }
+                                },
                                 {
                                   "key": {
                                     "symbol": "leaderboard"
