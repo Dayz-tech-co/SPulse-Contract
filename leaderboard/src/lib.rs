@@ -86,6 +86,10 @@ pub enum DataKey {
     // Issue #20: permanently flagged addresses. Every accrual path checks this
     // key and returns PlayerBanned if present.
     BannedPlayer(Address),
+    // Issue #18: cumulative PULSE this contract has minted to an address.
+    // Written only by mint_reward, the single minting chokepoint, so the sum
+    // over all players is exactly what the leaderboard put into circulation.
+    MintedTo(Address),
 }
 
 #[contracttype]
@@ -287,12 +291,7 @@ impl LeaderboardContract {
         if points == 0 {
             return Err(LeaderboardError::InvalidPoints);
         }
-        Self::require_not_banned(&env, &user)?;
-        Self::credit_points(&env, &user, points, Some(is_winner));
-        if tokens > 0 {
-            Self::mint_reward(&env, &user, tokens)?;
-        }
-        Ok(())
+        Self::settle_bet(&env, &user, points, tokens, is_winner)
     }
 
     /// Legacy market-contract entrypoint; like reward() but without internal
@@ -309,9 +308,12 @@ impl LeaderboardContract {
         caller.require_auth();
         // add_pts historically accepts 0 (a recorded loss with no points), so
         // unlike reward() it does not reject 0.
-        Self::require_not_banned(&env, &user)?;
-        Self::credit_points(&env, &user, pts, Some(is_won));
-        Ok(())
+        //
+        // Issue #18: behaviour is unchanged — it records a settled bet and
+        // mints nothing — but it is no longer a second *implementation* of
+        // that. It delegates to settle_bet with tokens = 0, the same code
+        // reward runs, so the two cannot drift apart again.
+        Self::settle_bet(&env, &user, pts, 0, is_won)
     }
 
     // ── Issue #24: an explicit way to reduce a player's points ───────────────
@@ -505,11 +507,14 @@ impl LeaderboardContract {
     pub fn get_points(env: Env, user: Address) -> u64 {
         let pts = Self::decayed_stats(&env, &user).points;
         // Issue #166: extend TTL on read so idle player stats cannot expire
-        // while a user is checking their score.
+        // while a user is checking their score. Only bump when the key
+        // exists — a user who never accrued points must read 0, not panic.
         let key = DataKey::Stats(user);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
         pts
     }
 
@@ -518,10 +523,14 @@ impl LeaderboardContract {
     pub fn get_stats(env: Env, user: Address) -> PlayerStats {
         let stats = Self::decayed_stats(&env, &user);
         // Issue #166: extend TTL on read so idle player stats cannot expire.
+        // Only bump when the key exists — an unregistered user must read
+        // zeroed stats, not panic on extend_ttl of a missing key.
         let key = DataKey::Stats(user);
-        env.storage()
-            .persistent()
-            .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
         stats
     }
 
@@ -883,10 +892,8 @@ impl LeaderboardContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::TokenContract, token);
-        // Issue #170: persist the expected ABI version alongside the token
-        // address itself, so require_compatible_token's read of
-        // DataKey::ExpectedTokenVersion actually reflects what was
-        // configured here instead of always falling back to the default.
+        // Issue #170: record the expected token ABI version so
+        // require_compatible_token can enforce it at reward time.
         env.storage()
             .instance()
             .set(&DataKey::ExpectedTokenVersion, &expected_version);
@@ -931,6 +938,17 @@ impl LeaderboardContract {
                 tokens.into_val(env),
             ],
         );
+
+        // Issue #18: the single place a mint is recorded. Every minting path
+        // in this contract funnels through here, so this tally is a complete
+        // account of what the leaderboard put into circulation — which is what
+        // makes points and supply reconcilable after the fact.
+        let key = DataKey::MintedTo(user.clone());
+        let minted: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        env.storage().persistent().set(&key, &(minted + tokens));
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         Ok(())
     }
 
@@ -994,6 +1012,51 @@ impl LeaderboardContract {
         let mut out = s.to_player_stats();
         out.points = Self::decay(s.points, now.saturating_sub(written_at));
         out
+    }
+
+    // ── The settled-bet path (issue #18) ──────────────────────────────────
+    //
+    // reward and add_pts are both market-authorized and both record a settled
+    // bet. They used to do it with separate copies of the same bookkeeping,
+    // differing only in that reward minted — so the same user action moved
+    // token supply differently depending on which symbol the caller reached
+    // for, and since both wrote byte-identical stats, storage kept no trace of
+    // which had run.
+    //
+    // Recording a settled bet now has exactly one implementation, and the
+    // token amount is a parameter of it rather than a property of which
+    // function you called. mint_reward tallies every mint into MintedTo, so
+    // points and supply can be reconciled afterwards even across the deferred
+    // queue_reward -> claim_pending_rewards path.
+
+    /// The single implementation of "a settled bet happened". Both market
+    /// entry points route here; `tokens = 0` records points without minting.
+    fn settle_bet(
+        env: &Env,
+        user: &Address,
+        points: u64,
+        tokens: i128,
+        is_winner: bool,
+    ) -> Result<(), LeaderboardError> {
+        Self::require_not_banned(env, user)?;
+        Self::credit_points(env, user, points, Some(is_winner));
+        if tokens > 0 {
+            Self::mint_reward(env, user, tokens)?;
+        }
+        Ok(())
+    }
+
+    /// Cumulative PULSE this contract has minted to `user`.
+    ///
+    /// Issue #18 asked for a reconciliation between the point-recording paths
+    /// and the minting ones. This is it: whatever entry point ran, the mint is
+    /// counted here, so an indexer can check the leaderboard's own tally
+    /// against the token's balances and supply.
+    pub fn get_minted(env: Env, user: Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::MintedTo(user))
+            .unwrap_or(0)
     }
 
     fn credit_points(env: &Env, user: &Address, pts: u64, is_won: Option<bool>) {

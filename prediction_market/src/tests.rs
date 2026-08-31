@@ -1811,6 +1811,131 @@ fn test_cancel_fees_zeroed_correctly() {
     t.client.cancel_refund(&bob, &id);
 }
 
+// ── 43. Market creation guardrails (issue #55) ──────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #27)")]
+fn test_reject_market_below_min_duration() {
+    let t = setup();
+    // Issue #55: MIN_MARKET_DURATION_SECS is 1 hour — a market that expires
+    // in minutes can be front-run and resolved before meaningful
+    // participation.
+    t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Too short"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Crypto,
+        &3599_u64,
+    );
+}
+
+#[test]
+fn test_open_market_count_tracks_creations() {
+    let t = setup();
+    assert_eq!(t.client.get_open_market_count(), 0);
+    create_test_market(&t);
+    create_test_market(&t);
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 3);
+    assert_eq!(t.client.get_market_count(), 3);
+}
+
+#[test]
+fn test_resolve_releases_open_market_slot() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let _ = create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+    t.client.place_bet(&user, &id1, &true, &50_0000000_i128);
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id1, &true);
+    assert_eq!(t.client.get_open_market_count(), 1);
+
+    // The freed slot is immediately reusable.
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+}
+
+#[test]
+fn test_cancel_releases_open_market_slot() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let _ = create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+
+    t.client.cancel_market(&t.admin, &id1);
+    assert_eq!(t.client.get_open_market_count(), 1);
+
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #41)")]
+fn test_open_market_cap_rejects_overflow() {
+    let t = setup();
+    // The per-window rate limit (10) is tighter than the concurrency cap
+    // (50), so climb through 5 windows to fill MAX_OPEN_MARKETS.
+    for _ in 0..5u32 {
+        for i in 0..10u32 {
+            let _ = t.client.create_market(
+                &t.admin,
+                &String::from_str(&t.env, "Market"),
+                &String::from_str(&t.env, "https://x.png"),
+                &Category::Crypto,
+                &(3600_u64 + i as u64),
+            );
+        }
+        advance_ledgers(&t.env, RATE_WINDOW_LEDGERS);
+    }
+    assert_eq!(t.client.get_open_market_count(), 50);
+    // The 51st open market is rejected even with a fresh rate window — the
+    // concurrency check runs before check_rate.
+    t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Over the cap"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Sports,
+        &7200_u64,
+    );
+}
+
+#[test]
+fn test_open_market_cap_slot_released_by_cancel() {
+    let t = setup();
+    for _ in 0..5u32 {
+        for i in 0..10u32 {
+            let _ = t.client.create_market(
+                &t.admin,
+                &String::from_str(&t.env, "Market"),
+                &String::from_str(&t.env, "https://x.png"),
+                &Category::Crypto,
+                &(3600_u64 + i as u64),
+            );
+        }
+        advance_ledgers(&t.env, RATE_WINDOW_LEDGERS);
+    }
+    assert_eq!(t.client.get_open_market_count(), 50);
+
+    // Cancelling one market frees a slot immediately.
+    t.client.cancel_market(&t.admin, &1_u64);
+    assert_eq!(t.client.get_open_market_count(), 49);
+
+    // With a fresh rate window the freed slot can be used again.
+    let id = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Fresh slot"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Sports,
+        &7200_u64,
+    );
+    assert_eq!(id, 51);
+    assert_eq!(t.client.get_open_market_count(), 50);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 42. COMPREHENSIVE END-TO-END INTEGRATION TEST
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2419,12 +2544,10 @@ fn test_place_bet_rejects_incompatible_referral() {
     let cfg = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &fake_referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            referral: fake_referral.clone(),
+            ..cfg.clone()
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
@@ -2494,12 +2617,14 @@ fn activate_config(
 ) {
     t.client.set_config(
         &t.admin,
-        token,
-        referral,
-        leaderboard,
-        xlm_sac,
-        expected_referral_version,
-        expected_leaderboard_version,
+        &Config {
+            token: token.clone(),
+            referral: referral.clone(),
+            leaderboard: leaderboard.clone(),
+            xlm_sac: xlm_sac.clone(),
+            expected_referral_version: *expected_referral_version,
+            expected_leaderboard_version: *expected_leaderboard_version,
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
@@ -2837,12 +2962,14 @@ fn test_set_config_is_timelocked() {
     let before = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
-        &referral_registry::INTERFACE_VERSION,
-        &leaderboard::INTERFACE_VERSION,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: referral_registry::INTERFACE_VERSION,
+            expected_leaderboard_version: leaderboard::INTERFACE_VERSION,
+        },
     );
 
     // Staged but NOT applied yet.
@@ -2873,12 +3000,10 @@ fn test_execute_set_config_before_delay_rejected() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     // Too soon — the timelock has not matured.
     t.client.execute_set_config(&t.admin);
@@ -2909,12 +3034,10 @@ fn test_set_config_does_not_apply_immediately() {
 
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
 
     // Live config is unchanged until execute_set_config after the delay.
@@ -2932,12 +3055,10 @@ fn test_set_config_rejects_arbitrary_address() {
     let attacker = Address::generate(&t.env);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &attacker,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            referral: attacker.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -2949,12 +3070,10 @@ fn test_set_config_rejects_wasm_as_xlm_sac() {
     // A WASM/native contract must not be installable as the XLM SAC.
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.token,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            xlm_sac: cfg.token.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -2966,12 +3085,10 @@ fn test_set_config_execute_before_delay() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     t.client.execute_set_config(&t.admin);
 }
@@ -2983,12 +3100,10 @@ fn test_set_config_execute_after_delay_and_pin() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
@@ -3006,12 +3121,10 @@ fn test_cancel_set_config_during_dispute_window() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     t.client.cancel_set_config(&t.admin);
     assert!(t.client.get_pending_config().is_none());
@@ -3030,12 +3143,10 @@ fn test_set_config_multisig_requires_threshold() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     // Only the proposer approved (1 of 2).
@@ -3052,12 +3163,10 @@ fn test_cancel_set_config_removes_pending() {
     let cfg = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     assert!(t.client.get_pending_config().is_some());
 
@@ -3078,12 +3187,14 @@ fn test_set_config_rejects_non_admin() {
     let new_xlm = Address::generate(&t.env);
     t.client.set_config(
         &rando,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
-        &1_u32,
-        &1_u32,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
     );
 }
 
@@ -3098,12 +3209,10 @@ fn test_set_config_multisig_execute_with_second_approval() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
     t.client.approve_set_config(&g2);
     advance_time(&t.env, CONFIG_DELAY_SECS);
@@ -3118,15 +3227,7 @@ fn test_set_config_non_governor_rejected() {
     let t = setup();
     let cfg = t.client.get_config();
     let stranger = Address::generate(&t.env);
-    t.client.set_config(
-        &stranger,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
-    );
+    t.client.set_config(&stranger, &cfg);
 }
 
 fn last_event_name(env: &Env) -> Symbol {
@@ -3356,23 +3457,19 @@ fn test_set_config_rejects_duplicate_proposal() {
     let new_lb = second_leaderboard(&t);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
 
     // A second proposal while one is pending must be rejected.
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &new_lb,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -4677,4 +4774,71 @@ fn test_inv_withdraw_cap_scales_with_market_count() {
     // Single withdraw cannot exceed cap
     assert_eq!(withdrawn, cap);
     assert!(withdrawn < total_fees);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #18 — the live claim path is accountable end to end
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_claim_mints_once_and_the_leaderboard_tally_matches_supply() {
+    // Drives the real market -> leaderboard -> token chain a user's claim
+    // takes, then checks the leaderboard's own mint tally against what the
+    // token actually issued. That reconciliation is what issue #18 says was
+    // impossible while two market entry points could record the same bet
+    // differently.
+    let t = setup();
+    let id = create_test_market(&t);
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 200_0000000);
+    fund_user(&t, &bob, 200_0000000);
+
+    t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id, &false, &100_0000000_i128);
+
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
+
+    assert_eq!(t.token_client.total_supply(), 0);
+
+    t.client.claim(&alice, &id);
+    t.client.claim(&bob, &id);
+
+    // One settled bet each. Issue #24: a loss no longer mints a consolation
+    // prize (LOSE_TOKENS was removed) - only the winner's claim mints.
+    assert_eq!(t.token_client.balance(&alice), WIN_TOKENS);
+    assert_eq!(t.token_client.balance(&bob), 0);
+    assert_eq!(t.token_client.total_supply(), WIN_TOKENS);
+
+    // Points moved in step: a win credits WIN_POINTS; a loss costs
+    // LOSE_POINTS via penalize(), saturating at 0 since bob had no points
+    // before this (never negative).
+    assert_eq!(t.leaderboard_client.get_points(&alice), WIN_POINTS);
+    assert_eq!(t.leaderboard_client.get_points(&bob), 0);
+
+    // And the leaderboard's tally accounts for exactly what it minted.
+    assert_eq!(t.leaderboard_client.get_minted(&alice), WIN_TOKENS);
+    assert_eq!(t.leaderboard_client.get_minted(&bob), 0);
+    assert_eq!(
+        t.leaderboard_client.get_minted(&alice) + t.leaderboard_client.get_minted(&bob),
+        t.token_client.total_supply()
+    );
+}
+
+#[test]
+fn test_market_recording_a_bet_through_add_pts_moves_no_supply() {
+    // The market contract is an authorized caller of add_pts, so this is the
+    // exact call a legacy or buggy path inside claim() could make. It records
+    // the bet — that is its documented job — but mints nothing, and the tally
+    // says so, which is what makes the difference auditable rather than silent.
+    let t = setup();
+    let user = Address::generate(&t.env);
+
+    t.leaderboard_client
+        .add_pts(&t.client.address, &user, &WIN_POINTS, &true);
+
+    assert_eq!(t.leaderboard_client.get_points(&user), WIN_POINTS);
+    assert_eq!(t.leaderboard_client.get_minted(&user), 0);
+    assert_eq!(t.token_client.total_supply(), 0);
 }

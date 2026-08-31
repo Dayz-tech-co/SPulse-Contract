@@ -1642,6 +1642,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "OpenMarketCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "PinnedHashes"
                           }
                         ]
