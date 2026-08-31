@@ -4704,3 +4704,67 @@ fn test_inv_withdraw_cap_scales_with_market_count() {
     assert_eq!(withdrawn, cap);
     assert!(withdrawn < total_fees);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #18 — the live claim path is accountable end to end
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_claim_mints_once_and_the_leaderboard_tally_matches_supply() {
+    // Drives the real market -> leaderboard -> token chain a user's claim
+    // takes, then checks the leaderboard's own mint tally against what the
+    // token actually issued. That reconciliation is what issue #18 says was
+    // impossible while two market entry points could record the same bet
+    // differently.
+    let t = setup();
+    let id = create_test_market(&t);
+    let alice = Address::generate(&t.env);
+    let bob = Address::generate(&t.env);
+    fund_user(&t, &alice, 200_0000000);
+    fund_user(&t, &bob, 200_0000000);
+
+    t.client.place_bet(&alice, &id, &true, &100_0000000_i128);
+    t.client.place_bet(&bob, &id, &false, &100_0000000_i128);
+
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id, &true);
+
+    assert_eq!(t.token_client.total_supply(), 0);
+
+    t.client.claim(&alice, &id);
+    t.client.claim(&bob, &id);
+
+    // One settled bet each, one mint each.
+    assert_eq!(t.token_client.balance(&alice), WIN_TOKENS);
+    assert_eq!(t.token_client.balance(&bob), LOSE_TOKENS);
+    assert_eq!(t.token_client.total_supply(), WIN_TOKENS + LOSE_TOKENS);
+
+    // Points moved in step.
+    assert_eq!(t.leaderboard_client.get_points(&alice), WIN_POINTS);
+    assert_eq!(t.leaderboard_client.get_points(&bob), LOSE_POINTS);
+
+    // And the leaderboard's tally accounts for exactly what it minted.
+    assert_eq!(t.leaderboard_client.get_minted(&alice), WIN_TOKENS);
+    assert_eq!(t.leaderboard_client.get_minted(&bob), LOSE_TOKENS);
+    assert_eq!(
+        t.leaderboard_client.get_minted(&alice) + t.leaderboard_client.get_minted(&bob),
+        t.token_client.total_supply()
+    );
+}
+
+#[test]
+fn test_market_recording_a_bet_through_add_pts_moves_no_supply() {
+    // The market contract is an authorized caller of add_pts, so this is the
+    // exact call a legacy or buggy path inside claim() could make. It records
+    // the bet — that is its documented job — but mints nothing, and the tally
+    // says so, which is what makes the difference auditable rather than silent.
+    let t = setup();
+    let user = Address::generate(&t.env);
+
+    t.leaderboard_client
+        .add_pts(&t.client.address, &user, &WIN_POINTS, &true);
+
+    assert_eq!(t.leaderboard_client.get_points(&user), WIN_POINTS);
+    assert_eq!(t.leaderboard_client.get_minted(&user), 0);
+    assert_eq!(t.token_client.total_supply(), 0);
+}
