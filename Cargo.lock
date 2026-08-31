@@ -309,6 +309,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "cross_contract_invariants"
+version = "0.1.0"
+dependencies = [
+ "leaderboard",
+ "prediction_market",
+ "pulse_token",
+ "referral_registry",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "crypto-bigint"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -831,6 +842,7 @@ dependencies = [
 name = "leaderboard"
 version = "0.1.0"
 dependencies = [
+ "pulse_token",
  "soroban-sdk",
 ]
 

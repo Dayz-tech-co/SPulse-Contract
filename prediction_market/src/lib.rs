@@ -1,10 +1,13 @@
 #![no_std]
+// TODO: migrate every env.events().publish(...) call to the #[contractevent]
+// macro (soroban-sdk deprecated the raw Events::publish API). That's a
+// mechanical but wide-reaching change across all four contracts' event
+// schemas and their tests — tracked separately, out of scope here.
+#![allow(deprecated)]
 
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, token, vec, Address,
-    BytesN, Env, IntoVal, String, Symbol, Val, Vec,
-    contract, contracterror, contractimpl, contracttype, token, vec, Address, BytesN, Env, Executable,
-    IntoVal, String, Symbol, Val, Vec,
+    contract, contracterror, contractevent, contractimpl, contracttype, symbol_short, token, vec,
+    Address, BytesN, Env, Executable, IntoVal, String, Symbol, Val, Vec,
 };
 
 // ── Event schema (issue #52) ────────────────────────────────────────────────
@@ -29,15 +32,37 @@ use soroban_sdk::{
 const MIN_BET: i128 = 10_000_000; // minimum net stake: 1 XLM in stroops
 
 const MAX_BETS_PER_USER: u32 = 20;
-const MAX_MARKETS_PER_HOUR: u32 = 10;
-const MIN_MARKET_DURATION_SECS: u64 = 60; // issue #10: no instantly-expired markets
+// issue #56: the creation rate limit is anchored to the ledger sequence —
+// strictly monotonic on any Soroban network — instead of wall-clock
+// timestamps, which can regress and previously underflowed here.
+const RATE_WINDOW_LEDGERS: u32 = 720; // ≈1h of ledgers at ~5s per ledger
+const MAX_MARKETS_PER_WINDOW: u32 = 10;
+// Issues #10/#55: no instantly-expired or impractically short markets. A
+// market must stay open long enough for meaningful participation, so the
+// floor is 1 hour — an admin can no longer create a market that expires in
+// seconds, front-run a bet, and resolve it.
+const MIN_MARKET_DURATION_SECS: u64 = 3600;
+// Issue #55: cap on concurrently open markets (created but not yet resolved
+// or cancelled). Complements the per-window rate limit with a concurrency
+// bound, so an admin cannot flood the market list with garbage markets that
+// degrade the UI and get_market_count-based indexers. Expired-but-unresolved
+// markets still count until resolved/cancelled, forcing cleanup.
+const MAX_OPEN_MARKETS: u32 = 50;
 const MAX_BETTORS_PER_PAGE: u32 = 100;
+/// Sentinel market id for the unattributed pre-upgrade fee balance (#57).
+const LEGACY_MARKET_ID: u64 = 0;
 
-// Fee constants — multiply before divide to avoid precision loss
-const TOTAL_FEE_BPS: i128 = 200;
-const PLATFORM_FEE_BPS: i128 = 150;
-const BPS_DENOM: i128 = 10_000;
-const NET_NUMERATOR: i128 = 9_800;
+// Fee adjustments: multiply before divide to avoid precision.
+// net and total_fee are derived from ONE family so that
+// `net + total_fee == amount` ALWAYS holds (no stroop leakage):
+//   net       = floor(amount * 0.98)
+//   total_fee = amount - net = ceil(amount * 0.02)
+// (TOTAL fee rate is effectively 200 bps — split into 150 bps platform and
+// the remainder referral once the platform share is resolved.)
+pub const TOTAL_FEE_BPS: i128 = 200;
+pub const PLATFORM_FEE_BPS: i128 = 150;
+pub const BPS_DENOM: i128 = 10_000;
+pub const NET_NUMERATOR: i128 = 9_800;
 
 const WIN_POINTS: u64 = 30;
 const LOSE_POINTS: u64 = 10;
@@ -49,14 +74,15 @@ const LOSE_TOKENS: i128 = 2_0000000;
 // accumulator to an arbitrary address in one call.
 const WITHDRAW_DELAY_SECS: u64 = 86_400; // 24h timelock between request and payout
 const MAX_WITHDRAWAL_BPS: i128 = 2_000; // per-request cap: 20% of accumulated fees
-const CONFIG_DELAY_SECS: u64 = 86_400; // issue #51: dispute window before Config is live
+const CONFIG_DELAY_SECS: u64 = 604_800; // Issue #173: 7-day timelock (1 day was too short to detect a compromised governor)
 const MAX_GOVERNORS: u32 = 10;
 
-// Issue #93: config changes are staged and only take effect after this delay.
-// A compromised admin key can no longer redirect all fund flows instantly:
-// off-chain monitors get a window to detect the change (via the emitted
-// ConfigChangeStaged event) and the admin can cancel it before it lands.
-const CONFIG_CHANGE_DELAY_SECS: u64 = 86_400; // 24h timelock
+// Issue #93: config changes are staged and only take effect after
+// CONFIG_DELAY_SECS. A compromised admin key can no longer redirect all fund
+// flows instantly: off-chain monitors get a window to detect the change (via
+// the emitted ConfigChangeStaged event) and the admin can cancel it first.
+// Issue #3: challenge window after empty-side resolution before claims/fees unlock.
+const DISPUTE_WINDOW_SECS: u64 = 604_800; // 7 days
 
 // TTL: ~1yr threshold, ~2yr extend (mainnet: ~1 ledger/5s)
 const TTL_BUMP: u32 = 3_153_600;
@@ -71,9 +97,12 @@ pub const INTERFACE_VERSION: u32 = 1;
 // against. A deployed dependency reporting a different version may have a
 // changed credit/reward ABI — refuse the call rather than invoke blind
 // (issue #84).
-const EXPECTED_REFERRAL_INTERFACE_VERSION: u32 = 1;
-const EXPECTED_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
-
+// Issue #170: expected referral/leaderboard ABI versions are now stored in
+// instance storage (part of Config) instead of compile-time constants.
+// The governor must update them alongside address changes via set_config.
+// Keeping the compile-time constants as fallback defaults for fresh deploys.
+const DEFAULT_REFERRAL_INTERFACE_VERSION: u32 = 1;
+const DEFAULT_LEADERBOARD_INTERFACE_VERSION: u32 = 1;
 // ── Errors ────────────────────────────────────────────────────────────────────
 
 #[contracterror]
@@ -110,7 +139,7 @@ pub enum MarketError {
     WithdrawalTooSoon = 25,
     // Issue #95: operation blocked because the contract is paused.
     Paused = 26,
-    InvalidDuration = 27, // issue #10: duration below the minimum
+    InvalidDuration = 27,   // issue #10: duration below the minimum
     InvalidDependency = 28, // issue #51: address is not the expected executable kind
     WasmHashMismatch = 29,  // issue #51: live WASM hash != pinned / pending hash
     ConfigChangeExists = 30,
@@ -119,9 +148,26 @@ pub enum MarketError {
     InsufficientApprovals = 33,
     AlreadyApproved = 34,
     InvalidThreshold = 35,
-    IncompatibleInterface = 36, // issue #84
-    NoPendingConfig = 37, // issue #93
-    ReentrancyDetected = 38, // issue #1 defense-in-depth
+    /// A dependency (referral_registry or leaderboard) reported an
+    /// interface_version this contract wasn't built against (issue #84).
+    /// Note: a matching version number alone does not prove the callee's
+    /// actual function shape still matches, it only proves the callee's
+    /// author intended it to. The guarantee only holds if every breaking
+    /// ABI change (renamed function, changed argument order/count/type,
+    /// changed return type) always increments INTERFACE_VERSION in the same
+    /// commit. See EXPECTED_REFERRAL_INTERFACE_VERSION / EXPECTED_LEADERBOARD_INTERFACE_VERSION.
+    IncompatibleInterface = 36,
+    DisputePending = 37,
+    NoZeroSideResolution = 38,
+    DisputeWindowClosed = 39,
+    /// Registered resolver attempted to bet, or tried to resolve a market they
+    /// have a stake in (issue #3 collusion guard).
+    ResolverConflict = 40,
+    /// Issue #55: too many concurrently open markets — resolve or cancel some
+    /// before creating more.
+    TooManyOpenMarkets = 41,
+    /// Issue #1: reentrancy detected — a reentrant call was rejected.
+    ReentrancyDetected = 42,
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -131,31 +177,44 @@ pub enum DataKey {
     Admin,
     // Config addresses — all in instance storage (shared, cheap)
     Cfg, // single packed Config struct — 1 read instead of 5
-    PendingConfig, // staged, timelocked config change (issue #93)
     MarketCount,
+    // Issue #55: u32 count of markets currently open (created, unresolved).
+    OpenMarketCount,
     AccumulatedFees,
     Market(u64),
+    // Per-market ledger of the fees this market actually contributed to
+    // AccumulatedFees: platform fee for every bet, plus referral fee only
+    // when it was NOT paid out to a referrer. cancel_market reclaims this
+    // exact amount instead of reverse-engineering fees from the net pool
+    // (issue #87).
     MarketAccumulatedFees(u64),
-    Bet(u64, Address), // net_yes/net_no + gross + count packed; see BetEntry
+    Bet(u64, Address), // two-sided net_yes/net_no + gross + count packed; see BetEntry
     BettorCount(u64),
     BettorAt(u64, u32),
     Resolver(Address),
     FeeRecipient(Address),
-    RateWindow, // packed u64: high32=window_start_hi, low32=count
+    RateWindowSeq, // (u32 window_start_seq, u32 count) — ledger-sequence anchored (issue #56)
     // ── Settlement-time payouts (issue #2) ───────────────────────────────
     Payout(u64, Address), // i128 — exact payout computed at resolve time
+    // ── Fee provenance (issue #57): per-market earned fees ───────────────────────
+    MarketFees(u64),   // i128 — genuine earned fees for this market
+    LegacyFees,        // i128 — unattributed pre-migration balance
+    FeeLedgerMigrated, // bool — one-shot migration of the old global scalar
     // ── Timelocked withdrawal requests (issue #12) ───────────────────────
     PendingWithdrawal(Address), // caller -> WithdrawalRequest
+    // ── Zero-side principal vault (issue #3) ─────────────────────────────
+    // Holds empty-side pool metadata + locked platform fees. Never mixed into
+    // the withdrawable AccumulatedFees sum until the dispute window ends.
+    ForfeitedPool(u64),
+    ZeroSideDisputeActive,
     // ── Dependency governance (issue #51) ────────────────────────────────
     Governor(Address),
     GovernorCount,
     GovernorThreshold,
+    PendingConfig,
     PinnedHashes,
     // ── Emergency circuit-breaker (issue #83) ─────────────────────────────
     Paused,
-    // ── Systemic accounting (issue #1) ────────────────────────────────────
-    CancelState(u64),   // CancelState — per-market refund bookkeeping
-    Refundable(u64, Address), // i128 — per-user refundable amount on cancellation
     // ── Reentrancy guard (issue #89) ─────────────────────────────────────
     BetLock(u64, Address), // market_id+user -> bool: prevents reentrant place_bet
 }
@@ -168,17 +227,10 @@ pub struct Config {
     pub referral: Address,
     pub leaderboard: Address,
     pub xlm_sac: Address,
-}
-
-// ── Staged config change with a maturation timestamp (issue #93) ────────────
-#[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PendingConfig {
-    pub token: Address,
-    pub referral: Address,
-    pub leaderboard: Address,
-    pub xlm_sac: Address,
-    pub pending_at: u64,
+    /// Issue #170: runtime-configurable expected interface versions.
+    /// Governor must set these alongside address changes to prevent ABI mismatch.
+    pub expected_referral_version: u32,
+    pub expected_leaderboard_version: u32,
 }
 
 // Issue #93: emitted when set_config stages a change, so off-chain indexers
@@ -193,6 +245,7 @@ pub struct ConfigChangeStaged {
     pub xlm_sac: Address,
 }
 
+// ── BetEntry: two-sided position + Gross + BetCount in one slot ────────────
 /// WASM hashes (or the SAC sentinel) pinned for each Config role.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -233,11 +286,16 @@ pub struct WithdrawalRequest {
     pub requested_at: u64,
 }
 
-// ── CancelState: per-market refund bookkeeping (issue #1) ───────────────────
+/// Per-market vault for empty-side principal + locked fees (issue #3).
+/// Principal is paid via Payout; locked_fees rejoin MarketFees only after the
+/// dispute window (or stay out forever if the market is frozen/cancelled).
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CancelState {
-    pub refundable_remaining: i128, // Σ per-bettor refundable still unclaimed
+pub struct ForfeitedPool {
+    pub amount: i128,
+    pub locked_fees: i128,
+    pub resolved_at: u64,
+    pub frozen: bool,
 }
 
 // ── Domain Structs ────────────────────────────────────────────────────────────
@@ -320,12 +378,18 @@ impl PredictionMarketContract {
                 referral: referral_contract.clone(),
                 leaderboard: leaderboard_contract.clone(),
                 xlm_sac: xlm_sac.clone(),
+                // Issue #170: initialise expected interface versions to defaults.
+                expected_referral_version: DEFAULT_REFERRAL_INTERFACE_VERSION,
+                expected_leaderboard_version: DEFAULT_LEADERBOARD_INTERFACE_VERSION,
             },
         );
         env.storage().instance().set(&DataKey::MarketCount, &0_u64);
+        // Issue #178: no stored AccumulatedFees counter — total proven fees
+        // are always derived from per-market ledgers + LegacyFees.
+        env.storage().instance().set(&DataKey::LegacyFees, &0_i128);
         env.storage()
             .instance()
-            .set(&DataKey::AccumulatedFees, &0_i128);
+            .set(&DataKey::FeeLedgerMigrated, &true);
         env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
 
         // Bootstrap governance: the initializer is the first governor with
@@ -334,7 +398,9 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .set(&DataKey::Governor(admin.clone()), &true);
-        env.storage().instance().set(&DataKey::GovernorCount, &1_u32);
+        env.storage()
+            .instance()
+            .set(&DataKey::GovernorCount, &1_u32);
         env.storage()
             .instance()
             .set(&DataKey::GovernorThreshold, &1_u32);
@@ -351,7 +417,12 @@ impl PredictionMarketContract {
         }
         env.events().publish(
             (Symbol::new(&env, "initialized"), admin),
-            (token_contract, referral_contract, leaderboard_contract, xlm_sac),
+            (
+                token_contract,
+                referral_contract,
+                leaderboard_contract,
+                xlm_sac,
+            ),
         );
         Ok(())
     }
@@ -369,25 +440,18 @@ impl PredictionMarketContract {
         Ok(())
     }
 
-    /// Stage a config change (token / referral / leaderboard / xlm_sac). Admin
-    /// only. The change does NOT take effect immediately: it must mature past
-    /// CONFIG_CHANGE_DELAY_SECS via execute_set_config, giving off-chain
-    /// monitors time to detect it (via the ConfigChangeStaged event) and the
-    /// admin time to cancel it with cancel_set_config (issue #93).
-    /// Propose a Config change. Does **not** take effect immediately.
+    /// Propose a Config change (token / referral / leaderboard / xlm_sac +
+    /// expected ABI versions). Governor only. Does **not** take effect
+    /// immediately: it must mature past `CONFIG_DELAY_SECS` via
+    /// `execute_set_config`, giving off-chain monitors time to detect it (via
+    /// the ConfigChangeStaged event) and any governor time to cancel it with
+    /// `cancel_set_config` (issue #93).
     ///
-    /// Issue #51: live WASM hashes are read on-chain (not caller-supplied),
-    /// the proposal is emitted for monitors, and it only becomes active after
+    /// Live WASM hashes are read on-chain (not caller-supplied), the
+    /// proposal is emitted for monitors, and it only becomes active after
     /// `CONFIG_DELAY_SECS` **and** `GovernorThreshold` approvals via
     /// `execute_set_config`. Any governor can `cancel_set_config` in between.
-    pub fn set_config(
-        env: Env,
-        caller: Address,
-        token_contract: Address,
-        referral_contract: Address,
-        leaderboard_contract: Address,
-        xlm_sac: Address,
-    ) -> Result<(), MarketError> {
+    pub fn set_config(env: Env, caller: Address, cfg: Config) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
         if env.storage().instance().has(&DataKey::PendingConfig) {
@@ -396,83 +460,30 @@ impl PredictionMarketContract {
 
         let hashes = Self::fingerprint_config(
             &env,
-            &token_contract,
-            &referral_contract,
-            &leaderboard_contract,
-            &xlm_sac,
+            &cfg.token,
+            &cfg.referral,
+            &cfg.leaderboard,
+            &cfg.xlm_sac,
         )?;
         let mut approvers: Vec<Address> = Vec::new(&env);
         approvers.push_back(caller.clone());
         let pending = PendingConfigChange {
-            cfg: Config {
-                token: token_contract,
-                referral: referral_contract,
-                leaderboard: leaderboard_contract,
-                xlm_sac,
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
-
-        let pending_at = env.ledger().timestamp();
-        let pending = PendingConfig {
-            token: token_contract,
-            referral: referral_contract,
-            leaderboard: leaderboard_contract,
-            xlm_sac,
-            pending_at,
-        };
-        env.storage().instance().set(&DataKey::PendingConfig, &pending);
-
-        ConfigChangeStaged {
-            pending_at,
-            token: pending.token.clone(),
-            referral: pending.referral.clone(),
-            leaderboard: pending.leaderboard.clone(),
-            xlm_sac: pending.xlm_sac.clone(),
-        }
-        .publish(&env);
-        Ok(())
-    }
-
-    /// Apply a previously staged config change once its timelock has matured.
-    /// Admin only (issue #93).
-    pub fn execute_set_config(env: Env, admin: Address) -> Result<(), MarketError> {
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
-
-        let pending: PendingConfig = env
-            .storage()
-            .instance()
-            .get(&DataKey::PendingConfig)
-            .ok_or(MarketError::NoPendingConfig)?;
-
-        let now = env.ledger().timestamp();
-        if now < pending.pending_at || now - pending.pending_at < CONFIG_CHANGE_DELAY_SECS {
-            return Err(MarketError::ConfigChangeTooSoon);
-        }
-
-        env.storage().instance().set(
-            &DataKey::Cfg,
-            &Config {
-                token: pending.token,
-                referral: pending.referral,
-                leaderboard: pending.leaderboard,
-                xlm_sac: pending.xlm_sac,
-                token: token_contract.clone(),
-                referral: referral_contract.clone(),
-                leaderboard: leaderboard_contract.clone(),
-                xlm_sac: xlm_sac.clone(),
-            },
+            cfg: cfg.clone(),
             hashes,
             requested_at: env.ledger().timestamp(),
             approvers,
         };
+        let staged = ConfigChangeStaged {
+            pending_at: pending.requested_at,
+            token: pending.cfg.token.clone(),
+            referral: pending.cfg.referral.clone(),
+            leaderboard: pending.cfg.leaderboard.clone(),
+            xlm_sac: pending.cfg.xlm_sac.clone(),
+        };
         env.storage()
             .instance()
             .set(&DataKey::PendingConfig, &pending);
-        env.events().publish(
-            (Symbol::new(&env, "cfg_req"), caller),
-            pending,
-        );
+        staged.publish(&env);
         Ok(())
     }
 
@@ -493,10 +504,8 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .set(&DataKey::PendingConfig, &pending);
-        env.events().publish(
-            (Symbol::new(&env, "cfg_ok"), caller),
-            count,
-        );
+        env.events()
+            .publish((Symbol::new(&env, "cfg_ok"), caller), count);
         Ok(count)
     }
 
@@ -524,6 +533,8 @@ impl PredictionMarketContract {
             return Err(MarketError::InsufficientApprovals);
         }
 
+        // Re-read live WASM hashes so a dependency cannot swap bytecode
+        // during the delay window.
         let live = Self::fingerprint_config(
             &env,
             &pending.cfg.token,
@@ -535,18 +546,37 @@ impl PredictionMarketContract {
             return Err(MarketError::WasmHashMismatch);
         }
 
+        // Read the old config before overwriting, for the event.
+        let old_cfg: Config = env
+            .storage()
+            .instance()
+            .get(&DataKey::Cfg)
+            .expect("Cfg must be set before execute_set_config");
+
         env.storage().instance().set(&DataKey::Cfg, &pending.cfg);
         env.storage()
             .instance()
             .set(&DataKey::PinnedHashes, &pending.hashes);
         env.storage().instance().remove(&DataKey::PendingConfig);
         env.events().publish(
-            (Symbol::new(&env, "cfg_act"), caller),
-            pending.cfg,
+            (Symbol::new(&env, "cfg_act"), caller.clone()),
+            pending.cfg.clone(),
         );
+        // Issue #173: emit ConfigChanged with old/new addresses for
+        // off-chain monitoring. Critical for detecting a compromised
+        // governor silently re-pointing contracts.
         env.events().publish(
-            (Symbol::new(&env, "config_changed"), admin),
-            (token_contract, referral_contract, leaderboard_contract, xlm_sac),
+            (Symbol::new(&env, "config_changed"), caller),
+            (
+                old_cfg.token,
+                old_cfg.referral,
+                old_cfg.leaderboard,
+                old_cfg.xlm_sac,
+                pending.cfg.token,
+                pending.cfg.referral,
+                pending.cfg.leaderboard,
+                pending.cfg.xlm_sac,
+            ),
         );
         Ok(())
     }
@@ -559,28 +589,16 @@ impl PredictionMarketContract {
             return Err(MarketError::NoConfigChange);
         }
         env.storage().instance().remove(&DataKey::PendingConfig);
-        env.events().publish(
-            (Symbol::new(&env, "cfg_can"), caller),
-            1_u32,
-        );
-        env.storage().instance().remove(&DataKey::PendingConfig);
-        Ok(())
-    }
-
-    /// Cancel a staged config change before it matures. Admin only (issue #93).
-    pub fn cancel_set_config(env: Env, admin: Address) -> Result<(), MarketError> {
-        Self::require_admin(&env, &admin)?;
-        admin.require_auth();
-        if !env.storage().instance().has(&DataKey::PendingConfig) {
-            return Err(MarketError::NoPendingConfig);
-        }
-        env.storage().instance().remove(&DataKey::PendingConfig);
+        env.events()
+            .publish((Symbol::new(&env, "cfg_can"), caller), 1_u32);
         Ok(())
     }
 
     /// Read the currently staged (not yet effective) config change, if any.
-    pub fn get_pending_config(env: Env) -> Option<PendingConfig> {
+    pub fn get_pending_config(env: Env) -> Option<PendingConfigChange> {
         env.storage().instance().get(&DataKey::PendingConfig)
+    }
+
     pub fn add_governor(env: Env, admin: Address, governor: Address) -> Result<(), MarketError> {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
@@ -659,23 +677,23 @@ impl PredictionMarketContract {
     // ── Emergency circuit breaker (issue #95) ───────────────────────────────
 
     /// Halt (or resume) all risk-creating, settlement and withdrawal
-    /// operations: place_bet, create_market, resolve_market, cancel_market,
-    /// withdraw_fees, request_withdraw_fees and execute_withdraw_fees are
-    /// blocked while paused. User recovery paths — claim() and
-    /// cancel_refund() — stay available on purpose, so an emergency pause
-    /// never locks user funds in the contract. Admin only; idempotent.
+    /// operations: place_bet, create_market, reduce_position, resolve_market,
+    /// cancel_market, withdraw_fees, request_withdraw_fees and execute_withdraw_fees
+    /// are blocked while paused. User recovery paths — cancel_refund() — stay
+    /// available on purpose, so an emergency pause never locks user funds in the contract.
+    /// Admin only; idempotent.
     pub fn set_paused(env: Env, caller: Address, paused: bool) -> Result<(), MarketError> {
         Self::require_admin(&env, &caller)?;
         caller.require_auth();
         env.storage().instance().set(&DataKey::Paused, &paused);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        let ev = if paused { "paused" } else { "unpaused" };
+        env.events().publish((Symbol::new(&env, ev), caller), true);
         Ok(())
     }
 
     pub fn paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get::<_, bool>(&DataKey::Paused)
-            .unwrap_or(false)
+        Self::is_paused(env)
     }
 
     fn require_not_paused(env: &Env) -> Result<(), MarketError> {
@@ -688,10 +706,6 @@ impl PredictionMarketContract {
             return Err(MarketError::Paused);
         }
         Ok(())
-    }
-
-    pub fn get_pending_config(env: Env) -> Option<PendingConfigChange> {
-        env.storage().instance().get(&DataKey::PendingConfig)
     }
 
     pub fn get_pinned_hashes(env: Env) -> Option<PinnedHashes> {
@@ -717,6 +731,8 @@ impl PredictionMarketContract {
             .instance()
             .get(&DataKey::GovernorCount)
             .unwrap_or(0)
+    }
+
     /// The cross-contract ABI version this deployment implements (issue #84).
     pub fn interface_version(_env: Env) -> u32 {
         INTERFACE_VERSION
@@ -734,7 +750,9 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &true);
-        env.events().publish((Symbol::new(&env, "paused"), admin), true);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        env.events()
+            .publish((Symbol::new(&env, "paused"), admin), true);
         Ok(())
     }
 
@@ -742,7 +760,9 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
         env.storage().instance().set(&DataKey::Paused, &false);
-        env.events().publish((Symbol::new(&env, "unpaused"), admin), true);
+        env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
+        env.events()
+            .publish((Symbol::new(&env, "unpaused"), admin), true);
         Ok(())
     }
 
@@ -758,6 +778,19 @@ impl PredictionMarketContract {
     pub fn add_resolver(env: Env, admin: Address, resolver: Address) -> Result<(), MarketError> {
         Self::require_admin(&env, &admin)?;
         admin.require_auth();
+        // Issue #3: resolvers must not hold open stakes on any unsettled market.
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MarketCount)
+            .unwrap_or(0);
+        for id in 1..=count {
+            if let Ok(m) = Self::load_market(&env, id) {
+                if !m.resolved && !m.cancelled && Self::has_bet_on_market(&env, id, &resolver) {
+                    return Err(MarketError::ResolverConflict);
+                }
+            }
+        }
         let key = DataKey::Resolver(resolver);
         env.storage().persistent().set(&key, &true);
         env.storage()
@@ -828,6 +861,17 @@ impl PredictionMarketContract {
         if duration_secs < MIN_MARKET_DURATION_SECS {
             return Err(MarketError::InvalidDuration);
         }
+        // Issue #55: bound concurrent open markets so garbage markets cannot
+        // flood the UI/indexers. Checked before check_rate so a rejected
+        // creation does not consume a rate-limit slot.
+        let open_markets: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OpenMarketCount)
+            .unwrap_or(0);
+        if open_markets >= MAX_OPEN_MARKETS {
+            return Err(MarketError::TooManyOpenMarkets);
+        }
         Self::check_rate(&env)?;
 
         // OPT: single instance read for count (was already one read)
@@ -863,9 +907,17 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .set(&DataKey::MarketCount, &market_id);
+        // Issue #55: this market is now open — account it against the cap.
+        env.storage()
+            .instance()
+            .set(&DataKey::OpenMarketCount, &(open_markets + 1));
 
         env.events().publish(
-            (Symbol::new(&env, "market_created"), market.creator.clone(), market_id),
+            (
+                Symbol::new(&env, "market_created"),
+                market.creator.clone(),
+                market_id,
+            ),
             (market.category.clone(), market.end_time),
         );
         Ok(market_id)
@@ -882,10 +934,16 @@ impl PredictionMarketContract {
         Self::require_not_paused(&env)?;
         user.require_auth();
 
+        // Issue #3: resolvers must stay neutral — no betting on markets they
+        // may later resolve (admin is exempt; they are protocol-trusted).
+        if Self::is_registered_resolver(&env, &user) {
+            return Err(MarketError::ResolverConflict);
+        }
+
         // Issue 89: reentrancy guard — set lock before any external call
         let lock_key = DataKey::BetLock(market_id, user.clone());
         if env.storage().persistent().get(&lock_key).unwrap_or(false) {
-            return Err(MarketError::NotAuthorized); // reentrancy attempt
+            return Err(MarketError::ReentrancyDetected); // reentrancy attempt
         }
         env.storage().persistent().set(&lock_key, &true);
 
@@ -920,16 +978,13 @@ impl PredictionMarketContract {
                 env.storage().persistent().remove(&lock_key);
                 return Err(MarketError::TooManyBets);
             }
-            if e.is_yes != is_yes {
-                env.storage().persistent().remove(&lock_key);
-                return Err(MarketError::OppositeSideBet);
-            }
         }
 
         let is_increase = existing.is_some();
 
-        // ── Fee calculation — use precomputed multipliers ─────────────────
-        let total_fee = amount * TOTAL_FEE_BPS / BPS_DENOM;
+        // ── Exact fee decomposition (net + platform + referral == amount) ──
+        let net = amount * NET_NUMERATOR / BPS_DENOM;
+        let total_fee = amount - net;
         let platform_fee = amount * PLATFORM_FEE_BPS / BPS_DENOM;
         let referral_fee = total_fee - platform_fee;
 
@@ -937,6 +992,12 @@ impl PredictionMarketContract {
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
 
         // ── Issue 89: Write ALL state BEFORE external calls (check-effects-interaction) ──
+
+        // Credit the platform fee to this market's provenance ledger. The
+        // referral fee's disposition is decided by credit() below: paid to a
+        // registered referrer -> gone; unregistered/no referrer -> the fee is
+        // returned and retained as earned fees for this market (#78/#87/#57).
+        Self::credit_market_fees(&env, market_id, platform_fee);
 
         // ── Write BetEntry (net + gross + count in one write) ─────────────
         let new_entry = match existing {
@@ -999,12 +1060,18 @@ impl PredictionMarketContract {
         let this = env.current_contract_address();
         xlm.transfer(&user, &this, &amount);
 
-        // ── Referral — LIVE lookup from the registry (no stale cache) ───
-        // The HasReferrer cache is removed (issue #1 defect #3): the registry
-        // is consulted on every bet so a late-registered referrer is honored.
+        // ── Referral (live lookup — no stale cache) ───────────────────────
+        // referral_registry.credit() fully disposes of referral_fee itself:
+        // it pays a registered referrer, or (issue #99 redesign) refunds an
+        // unregistered bettor directly. Either way the XLM has already left
+        // this contract for good by the time credit() returns — there is
+        // nothing left here for the market to claim as its own earned fees.
+        // (Crediting it to market fees on a false return, like an earlier
+        // version of this code did, recorded a phantom fee no longer backed
+        // by any real balance.)
         Self::require_compatible_referral(&env, &cfg.referral)?;
         xlm.transfer(&this, &cfg.referral, &referral_fee);
-        let paid_referrer: bool = env.invoke_contract(
+        let _paid_referrer: bool = env.invoke_contract(
             &cfg.referral,
             &Symbol::new(&env, "credit"),
             vec![
@@ -1014,57 +1081,6 @@ impl PredictionMarketContract {
                 referral_fee.into_val(&env),
             ],
         );
-
-        // ── Fee accounting (post-external, atomic) ────────────────────────
-        // Only the platform fee goes into the accumulator; the referral fee
-        // is either already sent out or held by the referral contract (issue #78).
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees += platform_fee;
-        if !paid_referrer {
-            acc_fees += referral_fee;
-        }
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
-
-        // ── Per-market fee ledger (issue #87) ─────────────────────────────
-        // Record exactly what this bet added to the accumulator for this
-        // market. Referral fees transferred to a referrer are excluded.
-        let retained_fee = platform_fee + if paid_referrer { 0 } else { referral_fee };
-        let market_fee_key = DataKey::MarketAccumulatedFees(market_id);
-        let market_fees: i128 = env
-            .storage()
-            .persistent()
-            .get(&market_fee_key)
-            .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&market_fee_key, &(market_fees + retained_fee));
-        env.storage()
-            .persistent()
-            .extend_ttl(&market_fee_key, TTL_BUMP, TTL_HIGH);
-
-        // ── Refundable ledger (issue #1 defect #1) ───────────────────────
-        // Every bet records exactly what the market physically holds for this
-        // bettor: gross minus any referral fee already paid out. This makes
-        // cancel_refund always solvent.
-        let refundable_delta = amount - if paid_referrer { referral_fee } else { 0 };
-        let refundable_key = DataKey::Refundable(market_id, user.clone());
-        let cur_refundable: i128 = env
-            .storage()
-            .persistent()
-            .get(&refundable_key)
-            .unwrap_or(0);
-        env.storage()
-            .persistent()
-            .set(&refundable_key, &(cur_refundable + refundable_delta));
-        env.storage()
-            .persistent()
-            .extend_ttl(&refundable_key, TTL_BUMP, TTL_HIGH);
 
         // ── Release reentrancy lock ──────────────────────────────────────
         env.storage().persistent().remove(&lock_key);
@@ -1094,6 +1110,7 @@ impl PredictionMarketContract {
         market_id: u64,
         amount: i128,
     ) -> Result<i128, MarketError> {
+        Self::require_not_paused(&env)?;
         user.require_auth();
 
         if amount <= 0 {
@@ -1122,69 +1139,30 @@ impl PredictionMarketContract {
         }
 
         // Decompose exactly like place_bet so partial reductions stay integral.
+        // referral_registry.credit() (called from place_bet) fully disposes
+        // of the referral share (amount - net_part - plat_part) at bet time
+        // -- pays a registered referrer, or refunds the bettor directly if
+        // unregistered. The market never retains it either way, so it's
+        // never part of this refund.
         let net_part = amount * NET_NUMERATOR / BPS_DENOM;
         let plat_part = amount * PLATFORM_FEE_BPS / BPS_DENOM;
-        let ref_part = amount * TOTAL_FEE_BPS / BPS_DENOM - plat_part;
+        let refund = net_part + plat_part;
 
-        // Referral fee is refundable only when the contract still holds it.
-        // Use the Refundable ledger (issue #1) to determine the exact amount
-        // the contract holds for this bettor, then prorate for the partial reduction.
-        let refundable_total: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Refundable(market_id, user.clone()))
-            .unwrap_or(entry.gross);
-        // Prorate: refund_for_amount = amount * refundable_total / gross
-        let refund = if entry.gross > 0 {
-            amount * refundable_total / entry.gross
+        // Determine which side to reduce from.
+        let is_yes = entry.net_yes >= entry.net_no;
+        let dominated_net = if is_yes {
+            &mut entry.net_yes
         } else {
-            net_part
+            &mut entry.net_no
         };
 
         // ── State FIRST, external call last ───────────────────────────────
-        if is_yes {
-            entry.net_yes -= net_part;
-        } else {
-            entry.net_no -= net_part;
-        }
+        *dominated_net -= net_part;
         entry.gross -= amount;
 
-        // Update Refundable ledger proportionally.
-        if entry.gross > 0 {
-            let new_refundable = entry.gross * refundable_total / (entry.gross + amount);
-            env.storage().persistent().set(
-                &DataKey::Refundable(market_id, user.clone()),
-                &new_refundable,
-            );
-        } else {
-            env.storage().persistent().remove(&DataKey::Refundable(market_id, user.clone()));
-        }
-
-        // Accumulated fees shrink by the fees being released; never below 0
-        // (same clamp discipline as cancel_market / withdraw_fees).
-        // Fees released = gross reduction - net reduction (= total_fee for the portion).
-        let fees_released = amount - net_part;
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees = acc_fees.saturating_sub(fees_released);
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
-
-        // Also shrink the per-market fee ledger.
-        let market_fee_key = DataKey::MarketAccumulatedFees(market_id);
-        let old_market_fees: i128 = env
-            .storage()
-            .persistent()
-            .get(&market_fee_key)
-            .unwrap_or(0);
-        env.storage().persistent().set(
-            &market_fee_key,
-            &old_market_fees.saturating_sub(fees_released),
-        );
+        // The released fee share (platform only -- see refund above) leaves
+        // this market's provenance ledger and the global accumulator (#4/#57).
+        Self::debit_market_fees(&env, market_id, plat_part);
 
         if is_yes {
             market.total_yes -= net_part;
@@ -1231,6 +1209,12 @@ impl PredictionMarketContract {
         caller.require_auth();
         Self::require_admin_or_resolver(&env, &caller)?;
 
+        // Issue #3: anyone resolving must not hold a stake — blocks resolver
+        // collusion where they grief to the empty side then claim principal.
+        if Self::has_bet_on_market(&env, market_id, &caller) {
+            return Err(MarketError::ResolverConflict);
+        }
+
         let mut market = Self::load_market(&env, market_id)?;
         if market.resolved {
             return Err(MarketError::MarketResolved);
@@ -1249,19 +1233,81 @@ impl PredictionMarketContract {
             market.total_no
         };
 
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-
+        let mut dust: i128;
         if winning_side == 0 {
-            // No contest on the winning side — the whole pool is swept to
-            // accumulated fees (protocol-defined behavior, kept from prior
-            // design). Bettors still earn tokens/points via claim().
-            if total_pool > 0 {
-                acc_fees += total_pool;
+            // Issues #3/#57: never sweep user principal into the fee pot.
+            // Credit each bettor their net via the payout ledger so claim()
+            // can return it; lock this market's platform fees into
+            // ForfeitedPool for the dispute window.
+            let bettors_count: u32 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::BettorCount(market_id))
+                .unwrap_or(0);
+            let mut principal: i128 = 0;
+            for i in 0..bettors_count {
+                let slot_key = DataKey::BettorAt(market_id, i);
+                let bettor: Address = if let Some(a) = env.storage().persistent().get(&slot_key) {
+                    a
+                } else {
+                    continue;
+                };
+                let bet_key = DataKey::Bet(market_id, bettor.clone());
+                if let Some(entry) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, BetEntry>(&bet_key)
+                {
+                    let entry_net = entry.net_yes + entry.net_no;
+                    if entry_net > 0 {
+                        principal += entry_net;
+                        let payout_key = DataKey::Payout(market_id, bettor.clone());
+                        env.storage().persistent().set(&payout_key, &entry_net);
+                        env.storage()
+                            .persistent()
+                            .extend_ttl(&payout_key, TTL_BUMP, TTL_HIGH);
+                    }
+                }
             }
+
+            // Issue #47 follow-up: principal is the sum of tracked bettors'
+            // net stakes, but the bettor index can under-enumerate (bounded
+            // pagination, legacy migrated markets) so principal is not
+            // guaranteed to equal total_pool. Any shortfall is unclaimable
+            // by construction (no Payout was written for it) and must be
+            // swept to fees here — same invariant as the non-zero branch:
+            //   Σ payouts + dust == total_pool
+            dust = total_pool - principal;
+            debug_assert!(dust >= 0, "zero-side principal must never exceed the pool");
+            if dust < 0 {
+                dust = 0;
+            }
+
+            // Pull this market's fees out of the withdrawable pot for the
+            // dispute window — withdraw_fees cannot touch them.
+            let locked = Self::market_fee_balance(&env, market_id);
+            if locked > 0 {
+                Self::debit_market_fees(&env, market_id, locked);
+            }
+
+            let fp_key = DataKey::ForfeitedPool(market_id);
+            env.storage().persistent().set(
+                &fp_key,
+                &ForfeitedPool {
+                    amount: if principal > 0 { principal } else { total_pool },
+                    locked_fees: locked,
+                    resolved_at: env.ledger().timestamp(),
+                    frozen: false,
+                },
+            );
+            env.storage()
+                .persistent()
+                .extend_ttl(&fp_key, TTL_BUMP, TTL_HIGH);
+            env.events()
+                .publish((symbol_short!("zero_side"), market_id), total_pool);
+            env.storage()
+                .persistent()
+                .set(&DataKey::ZeroSideDisputeActive, &true);
         } else {
             // Settlement-time payouts (issue #2): compute EXACT per-winner
             // payouts and the deterministic remainder (dust) once, here, so:
@@ -1277,14 +1323,17 @@ impl PredictionMarketContract {
 
             for i in 0..bettors {
                 let slot_key = DataKey::BettorAt(market_id, i);
-                let bettor: Address =
-                    if let Some(a) = env.storage().persistent().get(&slot_key) {
-                        a
-                    } else {
-                        continue;
-                    };
+                let bettor: Address = if let Some(a) = env.storage().persistent().get(&slot_key) {
+                    a
+                } else {
+                    continue;
+                };
                 let bet_key = DataKey::Bet(market_id, bettor.clone());
-                if let Some(entry) = env.storage().persistent().get::<DataKey, BetEntry>(&bet_key) {
+                if let Some(entry) = env
+                    .storage()
+                    .persistent()
+                    .get::<DataKey, BetEntry>(&bet_key)
+                {
                     let entry_net = if outcome { entry.net_yes } else { entry.net_no };
                     if entry_net > 0 {
                         let payout = (entry_net * total_pool) / winning_side;
@@ -1298,16 +1347,16 @@ impl PredictionMarketContract {
                 }
             }
 
-            let dust: i128 = total_pool - payout_sum;
+            dust = total_pool - payout_sum;
             debug_assert!(dust >= 0, "payouts must never exceed the pool");
-            if dust > 0 {
-                acc_fees += dust;
-            }
         }
 
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
+        // Sweep the deterministic remainder into this market's fee ledger
+        // (issue #47/#178): Σ payouts + dust == total_pool, no trapped funds,
+        // and fees are per-market so withdraw_fees never touches other markets.
+        if dust > 0 {
+            Self::credit_market_fees(&env, market_id, dust);
+        }
 
         market.resolved = true;
         market.outcome = outcome;
@@ -1319,11 +1368,103 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        // Issue #55: the market is closed — release its open-market slot.
+        Self::decrement_open_markets(&env);
+        // Issue #178: no stored global counter — total is always derived.
+        let acc_fees = Self::compute_total_proven_fees(&env);
         env.events().publish(
             (Symbol::new(&env, "market_resolved"), caller, market_id),
             (outcome, total_pool, acc_fees),
         );
         Ok(())
+    }
+
+    // ── Zero-side dispute (issue #3) ──────────────────────────────────────
+    // Empty-side resolution opens a challenge window. Admin may freeze into
+    // cancel_refund (gross) during that window. After the window, anyone may
+    // finalize so locked platform fees rejoin the fee ledger.
+
+    pub fn freeze_market(env: Env, admin: Address, market_id: u64) -> Result<(), MarketError> {
+        Self::require_admin(&env, &admin)?;
+        admin.require_auth();
+
+        let mut market = Self::load_market(&env, market_id)?;
+        if market.cancelled {
+            return Err(MarketError::MarketCancelled);
+        }
+        if !market.resolved {
+            return Err(MarketError::MarketNotResolved);
+        }
+
+        let fp_key = DataKey::ForfeitedPool(market_id);
+        let mut pool: ForfeitedPool = env
+            .storage()
+            .persistent()
+            .get(&fp_key)
+            .ok_or(MarketError::NoZeroSideResolution)?;
+        if pool.frozen {
+            return Err(MarketError::MarketCancelled);
+        }
+        if Self::dispute_window_closed(&env, pool.resolved_at) {
+            return Err(MarketError::DisputeWindowClosed);
+        }
+
+        pool.frozen = true;
+        env.storage().persistent().set(&fp_key, &pool);
+        env.storage()
+            .persistent()
+            .extend_ttl(&fp_key, TTL_BUMP, TTL_HIGH);
+
+        // Clear settlement payouts — users must use cancel_refund for GROSS.
+        let bettors: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::BettorCount(market_id))
+            .unwrap_or(0);
+        for i in 0..bettors {
+            if let Some(bettor) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, Address>(&DataKey::BettorAt(market_id, i))
+            {
+                env.storage()
+                    .persistent()
+                    .remove(&DataKey::Payout(market_id, bettor));
+            }
+        }
+
+        market.cancelled = true;
+        let mkt_key = DataKey::Market(market_id);
+        env.storage().persistent().set(&mkt_key, &market);
+        env.storage()
+            .persistent()
+            .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        Ok(())
+    }
+
+    pub fn finalize_zero_side(env: Env, market_id: u64) -> Result<(), MarketError> {
+        Self::load_market(&env, market_id)?;
+        let fp_key = DataKey::ForfeitedPool(market_id);
+        let mut pool: ForfeitedPool = env
+            .storage()
+            .persistent()
+            .get(&fp_key)
+            .ok_or(MarketError::NoZeroSideResolution)?;
+        if pool.frozen {
+            return Err(MarketError::MarketCancelled);
+        }
+        if !Self::dispute_window_closed(&env, pool.resolved_at) {
+            return Err(MarketError::DisputePending);
+        }
+        Self::release_locked_fees(&env, market_id, &mut pool);
+        Ok(())
+    }
+
+    pub fn get_forfeited_pool(env: Env, market_id: u64) -> Option<ForfeitedPool> {
+        let key = DataKey::ForfeitedPool(market_id);
+        let val: Option<ForfeitedPool> = env.storage().persistent().get(&key);
+        Self::bump_if_present(&env, &key);
+        val
     }
 
     // ── Cancellation ──────────────────────────────────────────────────────
@@ -1345,45 +1486,24 @@ impl PredictionMarketContract {
         let mkt_key = DataKey::Market(market_id);
         env.storage().persistent().set(&mkt_key, &market);
         let _ = Self::refresh_market_keys(&env, market_id);
+        // Issue #55: the market is closed — release its open-market slot.
+        Self::decrement_open_markets(&env);
 
-        // Reclaim the fees this market actually contributed to the
-        // accumulator (issue #87). Referral fees already transferred to
-        // referrers at bet time are not in the accumulator, so we read the
-        // per-market ledger rather than reverse-engineering a fee from the
-        // net pool — the old net_pool * 200 bps / (10000 - 200) formula
-        // reclaimed referral fees that were never held, silently eating the
-        // platform fees of other (unrelated) markets.
-        let market_fee_key = DataKey::MarketAccumulatedFees(market_id);
-        let reclaim: i128 = env
-            .storage()
-            .persistent()
-            .get(&market_fee_key)
-            .unwrap_or(0);
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        acc_fees = if reclaim < acc_fees {
-            acc_fees - reclaim
-        } else {
-            0
-        };
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
-        // The market is cancelled and refunded in full — drop its fee ledger.
-        env.storage().persistent().remove(&market_fee_key);
+        // Issue #178: reclaim the full per-market ledger balance.
+        // Each market's fee ledger is isolated, so the balance only contains
+        // fees earned from bets on this market (plus any pre-migration dust),
+        // and a cancelled market cannot leave withdrawable phantom fees (#57).
+        let reclaim = Self::market_fee_balance(&env, market_id);
+        if reclaim > 0 {
+            Self::debit_market_fees(&env, market_id, reclaim);
+        }
 
-        // ── CancelState (issue #1) ──────────────────────────────────────
-        // Initialize the outstanding refund balance. Each cancel_refund call
-        // will decrement this. Per-bettor refundable amounts are stored in
-        // Refundable(market_id, user) keys set at bet time.
-        let net_pool = market.total_yes + market.total_no;
+        // The market is cancelled and refunded in full — its fee ledger is
+        // dropped above.
 
         env.events().publish(
             (Symbol::new(&env, "market_cancelled"), admin, market_id),
-            net_pool,
+            reclaim,
         );
         Ok(())
     }
@@ -1408,30 +1528,28 @@ impl PredictionMarketContract {
             return Err(MarketError::NoBetFound);
         }
 
-        // ── Refundable ledger (issue #1 defect #1) ──────────────────────
-        // The refundable amount is exactly what the market physically holds
-        // for this bettor: gross minus any referral fee already paid out.
-        // Legacy bets (before the Refundable key was added) fall back to gross.
-        let refundable: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Refundable(market_id, user.clone()))
-            .unwrap_or(entry.gross);
-
-        // Issue #58: decrement market totals so total_yes/total_no reflect
-        // that this bet has been refunded. Read net values BEFORE zeroing.
-        let mkt_key = DataKey::Market(market_id);
-        market.total_yes = market.total_yes.saturating_sub(entry.net_yes);
-        market.total_no = market.total_no.saturating_sub(entry.net_no);
-        env.storage().persistent().set(&mkt_key, &market);
-
+        let gross = entry.gross;
+        let net_yes = entry.net_yes;
+        let net_no = entry.net_no;
+        // place_bet always sends the referral share of gross out of this
+        // contract at bet time (to a referrer, or refunded to this same
+        // bettor by referral_registry directly) -- gross alone overstates
+        // what this contract still physically holds. Refund net + platform
+        // only, recomputing platform's share the same way place_bet did.
+        let refund = net_yes + net_no + (gross * PLATFORM_FEE_BPS / BPS_DENOM);
         // Issue #58: zero both gross (idempotency guard) and nets so that
         // get_bet no longer reports a staked amount after the refund.
         entry.gross = 0;
         entry.net_yes = 0;
         entry.net_no = 0;
         env.storage().persistent().set(&bet_key, &entry);
-        env.storage().persistent().set(&DataKey::Refundable(market_id, user.clone()), &0_i128);
+
+        // Issue #58: decrement market totals so total_yes/total_no reflect
+        // that this bet has been refunded.
+        let mkt_key = DataKey::Market(market_id);
+        market.total_yes = market.total_yes.saturating_sub(net_yes);
+        market.total_no = market.total_no.saturating_sub(net_no);
+        env.storage().persistent().set(&mkt_key, &market);
 
         // Read-time TTL refresh (issue #9): a refund must not be able to observe
         // an expired bet/market record — keep both alive so a user who returns
@@ -1444,19 +1562,17 @@ impl PredictionMarketContract {
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
 
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
-        if refundable > 0 {
-            token::Client::new(&env, &cfg.xlm_sac).transfer(
-                &env.current_contract_address(),
-                &user,
-                &refundable,
-            );
-        }
+        token::Client::new(&env, &cfg.xlm_sac).transfer(
+            &env.current_contract_address(),
+            &user,
+            &refund,
+        );
 
         env.events().publish(
             (Symbol::new(&env, "cancel_refund"), user, market_id),
-            refundable,
+            refund,
         );
-        Ok(refundable)
+        Ok(refund)
     }
 
     // ── Claim ─────────────────────────────────────────────────────────────
@@ -1473,6 +1589,9 @@ impl PredictionMarketContract {
         if !market.resolved {
             return Err(MarketError::MarketNotResolved);
         }
+        // Issue #3: zero-side principal cannot move until the dispute window
+        // closes (or the market is frozen into cancel_refund).
+        Self::enforce_zero_side_claim_window(&env, market_id)?;
 
         let bet_key = DataKey::Bet(market_id, user.clone());
         let mut entry: BetEntry = env
@@ -1493,7 +1612,6 @@ impl PredictionMarketContract {
             entry.net_no
         };
         let is_winner = winning_net > 0;
-        let total_pool = market.total_yes + market.total_no;
         let winning_side = if market.outcome {
             market.total_yes
         } else {
@@ -1506,8 +1624,6 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
-        // Read-time TTL refresh (issue #9 / #54): keep market + payout alive
-        // so a late claim on a long-lived market still pays out.
         env.storage()
             .persistent()
             .extend_ttl(&DataKey::Market(market_id), TTL_BUMP, TTL_HIGH);
@@ -1517,23 +1633,25 @@ impl PredictionMarketContract {
         let this = env.current_contract_address();
 
         // XLM payout straight from the settlement-time payout ledger.
-        // Winners are exactly the bettors who own a Payout entry; everyone
-        // else (losers, empty winning side) has no payout key at all.
-        let payout: i128 = if let Some(p) = env
+        // Winners are exactly the bettors who own a Payout entry; empty-side
+        // bettors (#3) get their net principal back through the same ledger.
+        let payout: i128 = env
             .storage()
             .persistent()
-            .get::<DataKey, i128>(&DataKey::Payout(market_id, user.clone()))
-        {
-            p
-        } else {
-            0
-        };
-        if is_winner && payout > 0 {
+            .get(&DataKey::Payout(market_id, user.clone()))
+            .unwrap_or(0);
+        // Gate on the dispute window (#3): a freshly resolved empty-side
+        // market keeps its vault frozen until DISPUTE_WINDOW_SECS passes.
+        let zero_side_frozen = env
+            .storage()
+            .persistent()
+            .get::<DataKey, ForfeitedPool>(&DataKey::ForfeitedPool(market_id))
+            .map(|fp| fp.frozen || env.ledger().timestamp() < fp.resolved_at + DISPUTE_WINDOW_SECS)
+            .unwrap_or(false);
+        if !zero_side_frozen && payout > 0 {
             token::Client::new(&env, &cfg.xlm_sac).transfer(&this, &user, &payout);
         }
 
-        // All participants earn PULSE tokens + leaderboard points regardless.
-        // When winning_side == 0, "winners" receive loser-tier rewards (no competition).
         let real_win = is_winner && winning_side > 0;
         let (points, tokens): (u64, i128) = if real_win {
             (WIN_POINTS, WIN_TOKENS)
@@ -1541,41 +1659,22 @@ impl PredictionMarketContract {
             (LOSE_POINTS, LOSE_TOKENS)
         };
 
-        // The leaderboard API was renamed reward() -> add_pts() (points only,
-        // no token amount), and add_pts no longer mints PULSE internally. The
-        // market mints the PULSE reward directly — it is the authorized minter
-        // for this legacy wiring, keeping the original mint semantics intact.
+        // Immediate reward settlement (issue #139): add_pts is deprecated in
+        // favor of reward(), which credits points/win-loss and mints the
+        // PULSE reward in one cross-contract hop.
+        Self::require_compatible_leaderboard(&env, &cfg.leaderboard)?;
         let _: Val = env.invoke_contract(
             &cfg.leaderboard,
-            &Symbol::new(&env, "add_pts"),
-        // Queue reward accounting as an optional side effect. A missing,
-        // paused, incompatible, or out-of-budget leaderboard must not roll
-        // back the already-completed claim and XLM payout.
-        let _ = env.try_invoke_contract::<Val, soroban_sdk::Error>(
-            &cfg.leaderboard,
-            &Symbol::new(&env, "queue_reward"),
+            &Symbol::new(&env, "reward"),
             vec![
                 &env,
                 this.clone().into_val(&env),
                 user.clone().into_val(&env),
                 points.into_val(&env),
+                tokens.into_val(&env),
                 real_win.into_val(&env),
             ],
         );
-        if tokens > 0 {
-            // PULSE is a custom token contract (not a token::Client-compatible
-            // SAC interface): mint directly via its exported `mint` ABI.
-            let _: Val = env.invoke_contract(
-                &cfg.token,
-                &Symbol::new(&env, "mint"),
-                vec![
-                    &env,
-                    this.clone().into_val(&env),
-                    user.clone().into_val(&env),
-                    tokens.into_val(&env),
-                ],
-            );
-        }
 
         env.events().publish(
             (Symbol::new(&env, "claim_processed"), user, market_id),
@@ -1590,6 +1689,10 @@ impl PredictionMarketContract {
     // caller, the admin, or a registered fee recipient. Fee recipients must
     // use the timelocked request_withdraw_fees -> execute_withdraw_fees flow,
     // which is also capped so the accumulator can never be drained at once.
+    //
+    // Issue #178: total proven fees are derived on-the-fly from per-market
+    // ledgers + LegacyFees (no stored global counter). Admin instant withdraw
+    // is capped per call (MAX_WITHDRAWAL_BPS) like the timelocked path.
 
     pub fn withdraw_fees(
         env: Env,
@@ -1601,30 +1704,54 @@ impl PredictionMarketContract {
         Self::require_admin(&env, &caller)?;
         Self::require_valid_fee_recipient(&env, &caller, &recipient)?;
 
-        let fees: i128 = env
+        // Issue #3: while any empty-side dispute window is open (or the market
+        // is frozen), nothing is withdrawable.
+        if env
             .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        if fees == 0 {
+            .persistent()
+            .has(&DataKey::ZeroSideDisputeActive)
+        {
             return Err(MarketError::NoFeesToWithdraw);
         }
+
+        // Issue #178: total is derived on-the-fly from per-market ledgers +
+        // LegacyFees (no stored global counter).
+        // Issue #163: only fees that are EARNED (market settled / swept) may
+        // be withdrawn. Fees of open markets are reserved to back a possible
+        // cancellation refund, so they are excluded from what is withdrawable:
+        // withdrawing them would leave the contract unable to honour
+        // cancel_refund and permanently diverge XLM balance from accounting.
+        Self::ensure_fee_ledger_migrated(&env);
+        let earned = Self::withdrawable_fees(&env);
+        if earned <= 0 {
+            return Err(MarketError::NoFeesToWithdraw);
+        }
+        // Issue #57: the admin's instant withdrawal is capped per call so a
+        // compromised fee recipient cannot drain the pot at once; provenance
+        // is debited pro-rata (legacy first, then settled markets).
+        let mut amount = earned * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+        if amount == 0 {
+            // Dust-safety: never trap the tail of the pot behind the cap.
+            amount = earned;
+        }
+        Self::debit_proven_fees(&env, amount)?;
 
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
         token::Client::new(&env, &cfg.xlm_sac).transfer(
             &env.current_contract_address(),
             &recipient,
-            &fees,
+            &amount,
         );
 
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &0_i128);
         env.events().publish(
-            (Symbol::new(&env, "fees_withdrawn"), caller, recipient.clone()),
-            fees,
+            (
+                Symbol::new(&env, "fees_withdrawn"),
+                caller,
+                recipient.clone(),
+            ),
+            amount,
         );
-        Ok(fees)
+        Ok(amount)
     }
 
     /// Issue #12: request a capped, timelocked withdrawal. The payout lands
@@ -1649,17 +1776,23 @@ impl PredictionMarketContract {
             return Err(MarketError::WithdrawalRequestExists);
         }
 
-        let fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        if amount > fees {
+        // Issue #178: total is derived on-the-fly from per-market ledgers +
+        // LegacyFees (no stored global counter).
+        // Issue #57/#163: only earned fees may be scheduled — the requested
+        // amount is debited immediately from provenance (legacy first, then
+        // settled markets), so pending requests can never double-spend. Fees
+        // of OPEN markets are reserved to back cancellation refunds and are
+        // NOT schedulable (issue #163).
+        Self::ensure_fee_ledger_migrated(&env);
+        let earned = Self::withdrawable_fees(&env);
+        if amount > earned {
             return Err(MarketError::WithdrawalTooLarge);
         }
+        Self::debit_proven_fees(&env, amount)?;
+
         // Cap: a single request may take at most MAX_WITHDRAWAL_BPS of the
-        // accumulator, so even a compromised recipient cannot drain it fully.
-        let cap = fees * MAX_WITHDRAWAL_BPS / BPS_DENOM;
+        // earned accumulator, so even a compromised recipient cannot drain it fully.
+        let cap = earned * MAX_WITHDRAWAL_BPS / BPS_DENOM;
         if amount > cap {
             return Err(MarketError::WithdrawalTooLarge);
         }
@@ -1705,21 +1838,8 @@ impl PredictionMarketContract {
             return Err(MarketError::WithdrawalTooSoon);
         }
 
-        let mut acc_fees: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0);
-        if acc_fees < req.amount {
-            return Err(MarketError::WithdrawalTooLarge);
-        }
-        acc_fees -= req.amount;
-
-        // Effects before interaction so a reentrant recipient cannot re-read
-        // stale accumulator state.
-        env.storage()
-            .instance()
-            .set(&DataKey::AccumulatedFees, &acc_fees);
+        // The accumulator was already debited at request time (issue #57
+        // provenance), so executing only releases the pending record and pays.
         env.storage().persistent().remove(&key);
 
         let cfg: Config = env.storage().instance().get(&DataKey::Cfg).unwrap();
@@ -1730,7 +1850,11 @@ impl PredictionMarketContract {
         );
 
         env.events().publish(
-            (Symbol::new(&env, "fees_withdrawn"), caller, req.recipient.clone()),
+            (
+                Symbol::new(&env, "fees_withdrawn"),
+                caller,
+                req.recipient.clone(),
+            ),
             req.amount,
         );
         Ok(req.amount)
@@ -1749,27 +1873,50 @@ impl PredictionMarketContract {
         if !env.storage().persistent().has(&key) {
             return Err(MarketError::NoWithdrawalRequest);
         }
+        let req: WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .ok_or(MarketError::NoWithdrawalRequest)?;
         env.storage().persistent().remove(&key);
-        env.events().publish(
-            (Symbol::new(&env, "withdraw_cancelled"), admin),
-            caller,
-        );
+
+        // Refund the recorded amount back to the fee provenance ledger: the
+        // request no longer exists, so those fees are withdrawable again.
+        // The amount was debited at request time (issue #57 provenance), so
+        // cancel restores it into LegacyFees (issue #178: totals are derived
+        // from per-market ledgers + LegacyFees, no global counter).
+        Self::credit_market_fees(&env, LEGACY_MARKET_ID, req.amount);
+        env.events()
+            .publish((Symbol::new(&env, "withdraw_cancelled"), admin), caller);
         Ok(())
     }
 
     // ── View Functions ────────────────────────────────────────────────────
 
     pub fn get_market(env: Env, market_id: u64) -> Result<Market, MarketError> {
-        Self::load_market(&env, market_id)
+        let mkt = Self::load_market(&env, market_id)?;
+        // Issue #166: extend TTL on read so claimable state cannot expire
+        // while a user is inspecting it.
+        let mkt_key = DataKey::Market(market_id);
+        env.storage()
+            .persistent()
+            .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        Ok(mkt)
     }
 
     // OPT: returns Bet (ABI-compatible) derived from BetEntry
     pub fn get_bet(env: Env, market_id: u64, user: Address) -> Result<Bet, MarketError> {
+        let bet_key = DataKey::Bet(market_id, user);
         let e: BetEntry = env
             .storage()
             .persistent()
-            .get(&DataKey::Bet(market_id, user))
+            .get(&bet_key)
             .ok_or(MarketError::NoBetFound)?;
+        // Issue #166: extend TTL on read so claimable bet data cannot expire
+        // while a user is inspecting it.
+        env.storage()
+            .persistent()
+            .extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
         Ok(Bet {
             amount: e.net_yes.max(e.net_no),
             is_yes: e.net_yes >= e.net_no,
@@ -1797,6 +1944,16 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .get(&DataKey::MarketCount)
+            .unwrap_or(0)
+    }
+
+    /// Issue #55: number of markets currently open (created, not yet resolved
+    /// or cancelled). Expired-but-unresolved markets still count until they
+    /// are resolved or cancelled.
+    pub fn get_open_market_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::OpenMarketCount)
             .unwrap_or(0)
     }
 
@@ -1839,28 +1996,29 @@ impl PredictionMarketContract {
     }
 
     pub fn get_accumulated_fees(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&DataKey::AccumulatedFees)
-            .unwrap_or(0)
-    }
-
-    /// Per-user refundable amount for a cancelled market (issue #1).
-    pub fn get_refundable(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Refundable(market_id, user))
-            .unwrap_or(0)
+        Self::compute_total_proven_fees(&env)
     }
 
     /// Remaining TTL (ledgers) of the Market key. 0 means missing/expired —
     /// integrators can warn before funds become unrecoverable (issue #54).
+    ///
+    /// Test-only: reading a live TTL requires the SDK's testutils extension,
+    /// so this view function is compiled out of non-test WASM builds.
+    #[cfg(any(test, feature = "testutils"))]
     pub fn get_market_ttl(env: Env, market_id: u64) -> u32 {
         let key = DataKey::Market(market_id);
         if !env.storage().persistent().has(&key) {
             return 0;
         }
-        env.storage().persistent().get_ttl(&key)
+        #[cfg(any(test, feature = "testutils"))]
+        {
+            use soroban_sdk::testutils::storage::Persistent as _;
+            env.storage().persistent().get_ttl(&key)
+        }
+        #[cfg(not(any(test, feature = "testutils")))]
+        {
+            TTL_BUMP
+        }
     }
 
     /// Permissionless keeper: anyone may pay to extend this market's
@@ -1872,17 +2030,13 @@ impl PredictionMarketContract {
     /// Permissionless migration: bump existing markets in
     /// `[start_id, start_id + limit)`. After a WASM upgrade this is how
     /// pre-existing entries get a fresh TTL without waiting for a user claim.
-    pub fn refresh_markets(
-        env: Env,
-        start_id: u64,
-        limit: u32,
-    ) -> Result<u32, MarketError> {
+    pub fn refresh_markets(env: Env, start_id: u64, limit: u32) -> Result<u32, MarketError> {
         let count: u64 = env
             .storage()
             .instance()
             .get(&DataKey::MarketCount)
             .unwrap_or(0);
-        let limit = limit.min(MAX_TTL_REFRESH_PAGE).max(1);
+        let limit = limit.clamp(1, MAX_TTL_REFRESH_PAGE);
         let mut bumped: u32 = 0;
         let mut id = if start_id == 0 { 1 } else { start_id };
         let end = id.saturating_add(limit as u64);
@@ -1910,29 +2064,213 @@ impl PredictionMarketContract {
     }
 
     pub fn get_payout(env: Env, market_id: u64, user: Address) -> i128 {
+        let key = DataKey::Payout(market_id, user);
+        let val: i128 = env.storage().persistent().get(&key).unwrap_or(0);
+        Self::bump_if_present(&env, &key);
+        val
+    }
+
+    // Fee provenance views (issue #57)
+    /// Genuine platform fees attributed to `market_id`. Independent of the
+    /// cached global sum, so a cancel or withdraw on another market cannot
+    /// change this value.
+    pub fn get_market_fees(env: Env, market_id: u64) -> i128 {
+        let fees = Self::market_fee_balance(&env, market_id);
+        // Issue #166: extend TTL on read so fee ledger data cannot expire.
+        if market_id != LEGACY_MARKET_ID {
+            let key = DataKey::MarketFees(market_id);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
+        fees
+    }
+
+    /// Unattributed pre-upgrade balance. `market_id == 0` in the ledger.
+    pub fn get_legacy_fees(env: Env) -> i128 {
+        Self::ensure_fee_ledger_migrated(&env);
         env.storage()
-            .persistent()
-            .get(&DataKey::Payout(market_id, user))
+            .instance()
+            .get(&DataKey::LegacyFees)
             .unwrap_or(0)
+    }
+
+    /// Permissionless one-shot: snapshot the pre-upgrade global scalar into
+    /// LegacyFees. Fresh deploys already set FeeLedgerMigrated at initialize.
+    pub fn migrate_fee_ledger(env: Env) {
+        Self::ensure_fee_ledger_migrated(&env);
     }
 
     pub fn get_user_bet_count(env: Env, market_id: u64, user: Address) -> u32 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: u32 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.count)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     pub fn get_bet_gross(env: Env, market_id: u64, user: Address) -> i128 {
-        env.storage()
+        let bet_key = DataKey::Bet(market_id, user);
+        let val: i128 = env
+            .storage()
             .persistent()
-            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user))
+            .get::<DataKey, BetEntry>(&bet_key)
             .map(|e| e.gross)
-            .unwrap_or(0)
+            .unwrap_or(0);
+        Self::bump_if_present(&env, &bet_key);
+        val
     }
 
     // ── Internal Helpers ──────────────────────────────────────────────────
+
+    /// Snapshot the pre-upgrade AccumulatedFees scalar into LegacyFees,
+    /// then remove the stale global counter. After migration, total proven
+    /// fees are always derived on-the-fly from per-market ledgers + LegacyFees
+    /// (issue #178).
+    fn ensure_fee_ledger_migrated(env: &Env) {
+        if env.storage().instance().has(&DataKey::FeeLedgerMigrated) {
+            return;
+        }
+        // Snapshot the old global scalar into LegacyFees.
+        let acc: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::AccumulatedFees)
+            .unwrap_or(0);
+        env.storage().instance().set(&DataKey::LegacyFees, &acc);
+        env.storage()
+            .instance()
+            .set(&DataKey::FeeLedgerMigrated, &true);
+        // Remove stale global counter — no longer the source of truth.
+        env.storage().instance().remove(&DataKey::AccumulatedFees);
+    }
+
+    fn market_fee_balance(env: &Env, market_id: u64) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        if market_id == LEGACY_MARKET_ID {
+            env.storage()
+                .instance()
+                .get(&DataKey::LegacyFees)
+                .unwrap_or(0)
+        } else {
+            env.storage()
+                .persistent()
+                .get(&DataKey::MarketFees(market_id))
+                .unwrap_or(0)
+        }
+    }
+
+    fn set_market_fee_balance(env: &Env, market_id: u64, amount: i128) {
+        if market_id == LEGACY_MARKET_ID {
+            env.storage().instance().set(&DataKey::LegacyFees, &amount);
+        } else {
+            let key = DataKey::MarketFees(market_id);
+            env.storage().persistent().set(&key, &amount);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
+    }
+
+    /// Issue #178: compute total proven fees on-the-fly from per-market
+    /// ledgers + LegacyFees. No stored global counter is used.
+    fn compute_total_proven_fees(env: &Env) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        let legacy: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::LegacyFees)
+            .unwrap_or(0);
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MarketCount)
+            .unwrap_or(0);
+        let mut total = legacy;
+        let mut id = count;
+        while id > 0 {
+            total += Self::market_fee_balance(env, id);
+            id -= 1;
+        }
+        total
+    }
+
+    fn credit_market_fees(env: &Env, market_id: u64, amount: i128) {
+        if amount <= 0 {
+            return;
+        }
+        Self::ensure_fee_ledger_migrated(env);
+        let next = Self::market_fee_balance(env, market_id) + amount;
+        Self::set_market_fee_balance(env, market_id, next);
+    }
+
+    fn debit_market_fees(env: &Env, market_id: u64, amount: i128) {
+        if amount <= 0 {
+            return;
+        }
+        let bal = Self::market_fee_balance(env, market_id);
+        let take = if amount < bal { amount } else { bal };
+        Self::set_market_fee_balance(env, market_id, bal - take);
+    }
+
+    /// Drain LegacyFees first, then per-market balances from newest to oldest.
+    /// Used by withdraw paths.
+    fn debit_proven_fees(env: &Env, amount: i128) -> Result<(), MarketError> {
+        Self::ensure_fee_ledger_migrated(env);
+        if amount <= 0 {
+            return Err(MarketError::InvalidAmount);
+        }
+        let acc = Self::compute_total_proven_fees(env);
+        if amount > acc {
+            return Err(MarketError::WithdrawalTooLarge);
+        }
+
+        let mut remaining = amount;
+        let legacy = Self::market_fee_balance(env, LEGACY_MARKET_ID);
+        let take_legacy = if remaining < legacy {
+            remaining
+        } else {
+            legacy
+        };
+        if take_legacy > 0 {
+            Self::debit_market_fees(env, LEGACY_MARKET_ID, take_legacy);
+            remaining -= take_legacy;
+        }
+        if remaining > 0 {
+            let count: u64 = env
+                .storage()
+                .instance()
+                .get(&DataKey::MarketCount)
+                .unwrap_or(0);
+            let mut id = count;
+            while remaining > 0 && id > 0 {
+                // Skip OPEN markets: their fees are reserved to back a
+                // possible cancellation refund (issue #163) and must never
+                // be drained by a withdrawal.
+                let is_open = match Self::load_market(env, id) {
+                    Ok(m) => !m.resolved && !m.cancelled,
+                    Err(_) => false,
+                };
+                if !is_open {
+                    let mf = Self::market_fee_balance(env, id);
+                    if mf > 0 {
+                        let take = if remaining < mf { remaining } else { mf };
+                        Self::debit_market_fees(env, id, take);
+                        remaining -= take;
+                    }
+                }
+                id -= 1;
+            }
+        }
+        if remaining > 0 {
+            return Err(MarketError::WithdrawalTooLarge);
+        }
+        Ok(())
+    }
 
     fn sac_sentinel(env: &Env) -> BytesN<32> {
         BytesN::from_array(env, &[0u8; 32])
@@ -1975,12 +2313,7 @@ impl PredictionMarketContract {
 
     fn approver_index(approvers: &Vec<Address>, who: &Address) -> Option<u32> {
         let n = approvers.len();
-        for i in 0..n {
-            if approvers.get(i).unwrap() == *who {
-                return Some(i);
-            }
-        }
-        None
+        (0..n).find(|&i| approvers.get(i).unwrap() == *who)
     }
 
     fn require_governor(env: &Env, caller: &Address) -> Result<(), MarketError> {
@@ -2038,8 +2371,69 @@ impl PredictionMarketContract {
                 Self::bump_if_present(env, &DataKey::Payout(market_id, addr));
             }
         }
+        Self::bump_if_present(env, &DataKey::MarketFees(market_id));
+        Self::bump_if_present(env, &DataKey::ForfeitedPool(market_id));
         env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         Ok(bettors)
+    }
+
+    /// True if `user` still holds an unclaimed / unrefunded stake on `market_id`.
+    fn has_bet_on_market(env: &Env, market_id: u64, user: &Address) -> bool {
+        let Some(entry) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, BetEntry>(&DataKey::Bet(market_id, user.clone()))
+        else {
+            return false;
+        };
+        !entry.claimed && (entry.net_yes > 0 || entry.net_no > 0 || entry.gross > 0)
+    }
+
+    fn is_registered_resolver(env: &Env, user: &Address) -> bool {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Resolver(user.clone()))
+            .unwrap_or(false)
+    }
+
+    fn dispute_window_closed(env: &Env, resolved_at: u64) -> bool {
+        let now = env.ledger().timestamp();
+        now >= resolved_at && now - resolved_at >= DISPUTE_WINDOW_SECS
+    }
+
+    fn release_locked_fees(env: &Env, market_id: u64, pool: &mut ForfeitedPool) {
+        if pool.frozen || pool.locked_fees <= 0 {
+            return;
+        }
+        let amount = pool.locked_fees;
+        pool.locked_fees = 0;
+        env.storage()
+            .persistent()
+            .remove(&DataKey::ZeroSideDisputeActive);
+        Self::credit_market_fees(env, market_id, amount);
+        let fp_key = DataKey::ForfeitedPool(market_id);
+        env.storage().persistent().set(&fp_key, pool);
+        env.storage()
+            .persistent()
+            .extend_ttl(&fp_key, TTL_BUMP, TTL_HIGH);
+    }
+
+    fn enforce_zero_side_claim_window(env: &Env, market_id: u64) -> Result<(), MarketError> {
+        let fp_key = DataKey::ForfeitedPool(market_id);
+        let mut pool: ForfeitedPool = match env.storage().persistent().get(&fp_key) {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+        if pool.frozen {
+            return Err(MarketError::MarketCancelled);
+        }
+        if !Self::dispute_window_closed(env, pool.resolved_at) {
+            return Err(MarketError::DisputePending);
+        }
+        Self::release_locked_fees(env, market_id, &mut pool);
+        Ok(())
+    }
+
     // Issue #84: check a dependency's reported ABI version before invoking
     // it, so a unilateral upgrade with an incompatible credit/reward
     // signature fails with a clear error instead of an opaque
@@ -2047,7 +2441,16 @@ impl PredictionMarketContract {
     fn require_compatible_referral(env: &Env, referral: &Address) -> Result<(), MarketError> {
         let version: u32 =
             env.invoke_contract(referral, &Symbol::new(env, "interface_version"), vec![env]);
-        if version != EXPECTED_REFERRAL_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        // instead of a compile-time constant, so the governor can update it
+        // when upgrading the referral contract.
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_referral_version)
+            .unwrap_or(DEFAULT_REFERRAL_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
         }
         Ok(())
@@ -2059,16 +2462,15 @@ impl PredictionMarketContract {
             &Symbol::new(env, "interface_version"),
             vec![env],
         );
-        if version != EXPECTED_LEADERBOARD_INTERFACE_VERSION {
+        // Issue #170: read expected version from instance storage (Config)
+        let expected: u32 = env
+            .storage()
+            .instance()
+            .get::<DataKey, Config>(&DataKey::Cfg)
+            .map(|c| c.expected_leaderboard_version)
+            .unwrap_or(DEFAULT_LEADERBOARD_INTERFACE_VERSION);
+        if version != expected {
             return Err(MarketError::IncompatibleInterface);
-        }
-        Ok(())
-    }
-
-    #[inline]
-    fn require_not_paused(env: &Env) -> Result<(), MarketError> {
-        if Self::is_paused(env.clone()) {
-            return Err(MarketError::Paused);
         }
         Ok(())
     }
@@ -2084,6 +2486,38 @@ impl PredictionMarketContract {
             return Err(MarketError::NotAdmin);
         }
         Ok(())
+    }
+
+    // ── Fee provenance internals (issues #57/#163/#178) ────────────────────
+
+    /// Sum of fees currently held by OPEN markets (not resolved, not
+    /// cancelled). These fees are reserved to back a possible cancellation
+    /// refund (issue #163): a cancelled market returns net + platform to its
+    /// bettors, so withdrawing them while the market is still open would make
+    /// the contract's XLM balance diverge from what cancel_refund owes.
+    fn open_market_fees(env: &Env) -> i128 {
+        Self::ensure_fee_ledger_migrated(env);
+        let count: u64 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MarketCount)
+            .unwrap_or(0);
+        let mut total: i128 = 0;
+        for id in 1..=count {
+            if let Ok(m) = Self::load_market(env, id) {
+                if !m.resolved && !m.cancelled {
+                    total += Self::market_fee_balance(env, id);
+                }
+            }
+        }
+        total
+    }
+
+    /// Fees that are genuinely withdrawable: the whole derived accumulator
+    /// minus the reserved open-market portion (issues #163 + #178).
+    fn withdrawable_fees(env: &Env) -> i128 {
+        let total = Self::compute_total_proven_fees(env);
+        total.saturating_sub(Self::open_market_fees(env))
     }
 
     fn require_admin_or_resolver(env: &Env, caller: &Address) -> Result<(), MarketError> {
@@ -2154,30 +2588,48 @@ impl PredictionMarketContract {
     // OPT: CreationWindow packed into two u32s stored as separate u32 keys
     // to avoid struct serialization. Actually simpler: store as (u64, u32) tuple
     // via a single key — Soroban serializes tuples efficiently.
-    fn check_rate(env: &Env) -> Result<(), MarketError> {
-        let now = env.ledger().timestamp();
-        // (window_start, count) packed — 1 read instead of 1 struct deserialize
-        let (ws, cnt): (u64, u32) = env
+    // issue #56: the window is anchored to the ledger sequence rather than
+    // wall-clock time. Ledger sequences are strictly monotonic on any Soroban
+    // network, so timestamp regressions can neither underflow the elapsed
+    // computation nor reset an active rate-limit window.
+    // Issue #55: a resolved/cancelled market releases its concurrency slot.
+    // saturating_sub guards against legacy markets that predate the counter.
+    #[inline]
+    fn decrement_open_markets(env: &Env) {
+        let open: u32 = env
             .storage()
             .instance()
-            .get(&DataKey::RateWindow)
-            .unwrap_or((now, 0));
+            .get(&DataKey::OpenMarketCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::OpenMarketCount, &open.saturating_sub(1));
+    }
 
-        // A timestamp regression must remain in the existing window. Using
-        // checked subtraction prevents underflow from resetting the limit and
-        // allowing an extra burst of market creations.
-        let elapsed = now.checked_sub(ws).unwrap_or(0);
-        let (new_ws, new_cnt) = if elapsed < 3600 {
-            if cnt >= MAX_MARKETS_PER_HOUR {
+    fn check_rate(env: &Env) -> Result<(), MarketError> {
+        let seq = env.ledger().sequence();
+        // (window_start_seq, count) — 1 read, cheap tuple serialization
+        let (ws, cnt): (u32, u32) = env
+            .storage()
+            .instance()
+            .get(&DataKey::RateWindowSeq)
+            .unwrap_or((seq, 0));
+
+        // Defensive fail-closed: if a hostile/incompatible host ever reported
+        // an out-of-order sequence, treat it as zero elapsed and keep the
+        // current window instead of resetting the rate limit.
+        let elapsed = seq.saturating_sub(ws);
+        let (new_ws, new_cnt) = if elapsed < RATE_WINDOW_LEDGERS {
+            if cnt >= MAX_MARKETS_PER_WINDOW {
                 return Err(MarketError::RateLimitExceeded);
             }
             (ws, cnt + 1)
         } else {
-            (now, 1)
+            (seq, 1)
         };
         env.storage()
             .instance()
-            .set(&DataKey::RateWindow, &(new_ws, new_cnt));
+            .set(&DataKey::RateWindowSeq, &(new_ws, new_cnt));
         Ok(())
     }
 }

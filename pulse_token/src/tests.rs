@@ -1,6 +1,9 @@
-use crate::{PULSETokenContract, PULSETokenContractClient};
+use crate::{DataKey, PULSETokenContract, PULSETokenContractClient, TTL_BUMP};
 use soroban_sdk::{
-    testutils::{Address as _, Events, Ledger as _},
+    testutils::{
+        storage::{Instance as _, Persistent as _},
+        Address as _, Events, Ledger as _, LedgerInfo,
+    },
     Address, Env, String, Symbol, TryFromVal, Val,
 };
 
@@ -22,6 +25,61 @@ fn init(env: &Env, client: &PULSETokenContractClient<'_>) -> Address {
         &7,
     );
     admin
+}
+
+/// A ledger whose `max_entry_ttl` is large enough to hold TTL_HIGH, matching
+/// the network parameters the contract is deployed against.
+fn ttl_env() -> Env {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set(LedgerInfo {
+        timestamp: 1_000_000,
+        protocol_version: 26,
+        sequence_number: 100,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 100,
+        min_persistent_entry_ttl: 100,
+        max_entry_ttl: 10_000_000,
+    });
+    env
+}
+
+fn advance_ledgers(env: &Env, n: u32) {
+    let seq = env.ledger().sequence();
+    env.ledger().set(LedgerInfo {
+        timestamp: env.ledger().timestamp() + 1,
+        protocol_version: 26,
+        sequence_number: seq + n,
+        network_id: Default::default(),
+        base_reserve: 10,
+        min_temp_entry_ttl: 100,
+        min_persistent_entry_ttl: 100,
+        max_entry_ttl: 10_000_000,
+    });
+}
+
+/// The live TTL the ledger holds for `key`, read from inside the contract.
+fn balance_ttl(env: &Env, contract: &Address, holder: &Address) -> u32 {
+    let key = DataKey::Balance(holder.clone());
+    env.as_contract(contract, || env.storage().persistent().get_ttl(&key))
+}
+
+fn instance_ttl(env: &Env, contract: &Address) -> u32 {
+    env.as_contract(contract, || env.storage().instance().get_ttl())
+}
+
+/// Mint `amount` to `to` and return the authorized minter.
+fn mint_to(
+    client: &PULSETokenContractClient<'_>,
+    env: &Env,
+    to: &Address,
+    amount: i128,
+) -> Address {
+    let minter = Address::generate(env);
+    client.set_minter(&minter);
+    client.mint(&minter, to, &amount);
+    minter
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -358,24 +416,6 @@ fn test_paused_rejects_mint() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #9)")]
-fn test_paused_rejects_transfer() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = setup(&env);
-    let admin = init(&env, &client);
-
-    let minter = Address::generate(&env);
-    client.set_minter(&minter);
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    client.mint(&minter, &alice, &50_0000000_i128);
-
-    client.pause(&admin);
-    client.transfer(&alice, &bob, &10_0000000_i128);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #9)")]
 fn test_paused_rejects_burn() {
     let env = Env::default();
     env.mock_all_auths();
@@ -416,8 +456,6 @@ fn test_view_functions_work_while_paused() {
 #[test]
 #[should_panic(expected = "Error(Contract, #10)")]
 fn test_set_minter_idempotent() {
-#[test]
-fn test_mint_emits_event() {
     let env = Env::default();
     env.mock_all_auths();
     let client = setup(&env);
@@ -470,6 +508,15 @@ fn test_get_authorized_minters() {
     assert!(minters.contains(&minter1));
     assert!(!minters.contains(&minter2));
     assert!(minters.contains(&minter3));
+}
+
+#[test]
+fn test_mint_emits_event() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
     let minter = Address::generate(&env);
     client.set_minter(&minter);
     let user = Address::generate(&env);
@@ -503,33 +550,370 @@ fn test_pause_requires_admin() {
 }
 
 #[test]
-fn test_pause_blocks_mint_and_burn_but_not_transfer() {
+fn test_set_paused_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    assert!(!client.paused());
+    client.set_paused(&admin, &true);
+    assert!(client.paused());
+    assert!(client.is_paused());
+
+    client.set_paused(&admin, &false);
+    assert!(!client.paused());
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let minter = Address::generate(&env);
+    client.set_minter(&minter);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.mint(&minter, &alice, &50_0000000_i128);
+
+    client.set_paused(&admin, &true);
+    client.transfer(&alice, &bob, &10_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_transfer_from() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let minter = Address::generate(&env);
+    client.set_minter(&minter);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let spender = Address::generate(&env);
+    client.mint(&minter, &alice, &50_0000000_i128);
+    client.approve(&alice, &spender, &20_0000000_i128, &1000);
+
+    client.set_paused(&admin, &true);
+    client.transfer_from(&spender, &alice, &bob, &10_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_approve() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.set_paused(&admin, &true);
+    client.approve(&alice, &spender, &20_0000000_i128, &1000);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+//  Issue #97 — extend TTL on storage keys
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_transfer_extends_ttl_on_both_balance_keys() {
+    let env = ttl_env();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    mint_to(&client, &env, &alice, 10_000_0000000_i128);
+    // Give bob an entry too, so we are measuring an extension and not a
+    // first-time write.
+    mint_to(&client, &env, &bob, 1_0000000_i128);
+
+    // Both holders go quiet for long enough that their entries are deep into
+    // the TTL window (but not yet expired).
+    advance_ledgers(&env, 4_000_000);
+
+    let alice_before = balance_ttl(&env, &client.address, &alice);
+    let bob_before = balance_ttl(&env, &client.address, &bob);
+    assert!(
+        alice_before < TTL_BUMP,
+        "setup invariant broken: alice's TTL ({alice_before}) should have decayed below TTL_BUMP"
+    );
+
+    client.transfer(&alice, &bob, &500_0000000_i128);
+
+    let alice_after = balance_ttl(&env, &client.address, &alice);
+    let bob_after = balance_ttl(&env, &client.address, &bob);
+    assert!(
+        alice_after > alice_before && alice_after >= TTL_BUMP,
+        "transfer did not extend the sender's balance TTL ({alice_before} -> {alice_after})"
+    );
+    assert!(
+        bob_after > bob_before && bob_after >= TTL_BUMP,
+        "transfer did not extend the recipient's balance TTL ({bob_before} -> {bob_after})"
+    );
+}
+
+#[test]
+fn test_burn_extends_ttl_on_remaining_balance() {
+    let env = ttl_env();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    mint_to(&client, &env, &alice, 10_000_0000000_i128);
+    advance_ledgers(&env, 4_000_000);
+
+    let before = balance_ttl(&env, &client.address, &alice);
+    assert!(
+        before < TTL_BUMP,
+        "setup invariant broken: TTL ({before}) should be below TTL_BUMP"
+    );
+
+    // A partial burn leaves a live balance behind — that remainder needs its
+    // TTL refreshed just as much as a transfer's does.
+    client.burn(&alice, &1_000_0000000_i128);
+
+    let after = balance_ttl(&env, &client.address, &alice);
+    assert!(
+        after > before && after >= TTL_BUMP,
+        "burn did not extend the remaining balance's TTL ({before} -> {after})"
+    );
+    assert_eq!(client.balance(&alice), 9_000_0000000_i128);
+}
+
+#[test]
+fn test_transfer_from_extends_ttl_on_both_balance_keys() {
+    let env = ttl_env();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let spender = Address::generate(&env);
+    mint_to(&client, &env, &alice, 10_000_0000000_i128);
+    mint_to(&client, &env, &bob, 1_0000000_i128);
+
+    advance_ledgers(&env, 4_000_000);
+    // Approve *after* the fast-forward so the allowance itself is still live.
+    client.approve(
+        &alice,
+        &spender,
+        &1_000_0000000_i128,
+        &(env.ledger().sequence() + 1_000),
+    );
+
+    let alice_before = balance_ttl(&env, &client.address, &alice);
+    let bob_before = balance_ttl(&env, &client.address, &bob);
+
+    client.transfer_from(&spender, &alice, &bob, &500_0000000_i128);
+
+    assert!(
+        balance_ttl(&env, &client.address, &alice) > alice_before,
+        "transfer_from did not extend the sender's balance TTL"
+    );
+    assert!(
+        balance_ttl(&env, &client.address, &bob) > bob_before,
+        "transfer_from did not extend the recipient's balance TTL"
+    );
+}
+
+#[test]
+fn test_mint_extends_balance_and_instance_ttl() {
+    let env = ttl_env();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let minter = mint_to(&client, &env, &alice, 1_0000000_i128);
+    advance_ledgers(&env, 4_000_000);
+
+    let balance_before = balance_ttl(&env, &client.address, &alice);
+    let instance_before = instance_ttl(&env, &client.address);
+
+    client.mint(&minter, &alice, &1_0000000_i128);
+
+    assert!(
+        balance_ttl(&env, &client.address, &alice) > balance_before,
+        "mint did not extend the recipient's balance TTL"
+    );
+    // TotalSupply lives in instance storage — the other half of the
+    // total_supply == sum(balances) invariant must stay alive too.
+    assert!(
+        instance_ttl(&env, &client.address) > instance_before,
+        "mint did not extend the instance TTL that carries TotalSupply"
+    );
+}
+
+// ── The headline: an active holder's tokens survive past the original TTL ────
+
+#[test]
+fn test_balance_survives_beyond_original_ttl_and_supply_stays_consistent() {
+    // The adversarial scenario from the issue: Alice holds PULSE and the
+    // ledger runs far past the TTL her entry was created with. Before the fix
+    // her entry is evicted, her balance reads 0, and total_supply keeps
+    // counting the tokens she can no longer touch. After the fix, every
+    // operation that touches her balance renews it, so the invariant
+    // total_supply == sum(balances) holds the whole way through.
+    let env = ttl_env();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    mint_to(&client, &env, &alice, 10_000_0000000_i128);
+    mint_to(&client, &env, &bob, 10_000_0000000_i128);
+
+    let original_ttl = balance_ttl(&env, &client.address, &alice);
+
+    // Run the ledger well past the entry's original lifetime, transacting
+    // periodically the way a live holder would.
+    let mut elapsed: u32 = 0;
+    while elapsed < original_ttl * 2 {
+        advance_ledgers(&env, 4_000_000);
+        elapsed += 4_000_000;
+        client.transfer(&alice, &bob, &1_0000000_i128);
+        client.transfer(&bob, &alice, &1_0000000_i128);
+    }
+
+    // Balances intact...
+    assert_eq!(client.balance(&alice), 10_000_0000000_i128);
+    assert_eq!(client.balance(&bob), 10_000_0000000_i128);
+    // ...and the token's core invariant still holds.
+    assert_eq!(
+        client.total_supply(),
+        client.balance(&alice) + client.balance(&bob),
+        "total_supply diverged from the sum of balances"
+    );
+    // Every entry still has a healthy lifetime ahead of it.
+    assert!(balance_ttl(&env, &client.address, &alice) >= TTL_BUMP);
+    assert!(balance_ttl(&env, &client.address, &bob) >= TTL_BUMP);
+    assert!(instance_ttl(&env, &client.address) >= TTL_BUMP);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #79 — supply cap prevents unbounded PULSE inflation
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[test]
+fn test_supply_cap_default_unlimited() {
     let env = Env::default();
     env.mock_all_auths();
     let client = setup(&env);
     let _admin = init(&env, &client);
-
     let minter = Address::generate(&env);
     let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
     client.set_minter(&minter);
 
+    // Default cap is 0 (unlimited) — minting should work.
+    assert_eq!(client.get_supply_cap(), 0);
+    client.mint(&minter, &alice, &1_000_0000000_i128);
+    assert_eq!(client.total_supply(), 1_000_0000000_i128);
+}
+
+#[test]
+fn test_set_supply_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+    let minter = Address::generate(&env);
+    let alice = Address::generate(&env);
+    client.set_minter(&minter);
+
+    // Set cap to 100 PULSE.
+    client.set_supply_cap(&admin, &100_0000000_i128);
+    assert_eq!(client.get_supply_cap(), 100_0000000_i128);
+
+    // Mint 50 PULSE — should succeed.
+    client.mint(&minter, &alice, &50_0000000_i128);
+    assert_eq!(client.total_supply(), 50_0000000_i128);
+
+    // Mint 60 more PULSE — total would be 110, exceeding cap.
+    assert!(client.try_mint(&minter, &alice, &60_0000000_i128).is_err());
+    assert_eq!(client.total_supply(), 50_0000000_i128); // unchanged
+}
+
+#[test]
+fn test_supply_cap_exact_boundary() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+    let minter = Address::generate(&env);
+    let alice = Address::generate(&env);
+    client.set_minter(&minter);
+
+    // Set cap to 100 PULSE.
+    client.set_supply_cap(&admin, &100_0000000_i128);
+
+    // Mint exactly 100 PULSE — should succeed.
     client.mint(&minter, &alice, &100_0000000_i128);
-    assert_eq!(client.balance(&alice), 100_0000000_i128);
+    assert_eq!(client.total_supply(), 100_0000000_i128);
 
-    // Emergency pause: admin halts supply-changing ops…
-    client.set_paused(&_admin, &true);
-    assert!(client.paused());
-    assert!(client.try_mint(&minter, &alice, &10_0000000_i128).is_err());
-    assert!(client.try_burn(&alice, &10_0000000_i128).is_err());
+    // Mint 1 stroop more — should fail.
+    assert!(client.try_mint(&minter, &alice, &1).is_err());
+    assert_eq!(client.total_supply(), 100_0000000_i128); // unchanged
+}
 
-    // …but users can still move their own tokens (no fund lock-in).
-    client.transfer(&alice, &bob, &25_0000000_i128);
-    assert_eq!(client.balance(&bob), 25_0000000_i128);
+#[test]
+fn test_supply_cap_clear() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+    let minter = Address::generate(&env);
+    let alice = Address::generate(&env);
+    client.set_minter(&minter);
 
-    // Resume restores minting.
-    client.set_paused(&_admin, &false);
-    assert!(!client.paused());
+    // Set cap, mint up to it.
+    client.set_supply_cap(&admin, &10_0000000_i128);
     client.mint(&minter, &alice, &10_0000000_i128);
-    assert_eq!(client.balance(&alice), 85_0000000_i128);
+    assert!(client.try_mint(&minter, &alice, &1).is_err());
+
+    // Clear cap (set to 0) — minting resumes.
+    client.set_supply_cap(&admin, &0);
+    assert_eq!(client.get_supply_cap(), 0);
+    client.mint(&minter, &alice, &1_0000000_i128);
+    assert_eq!(client.total_supply(), 11_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_set_supply_cap_requires_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let _admin = init(&env, &client);
+    let rando = Address::generate(&env);
+
+    // Non-admin must fail with NotAdmin.
+    client.set_supply_cap(&rando, &1_000_0000000_i128);
+}
+
+#[test]
+fn test_supply_cap_balance_unchanged_on_reject() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+    let minter = Address::generate(&env);
+    let alice = Address::generate(&env);
+    client.set_minter(&minter);
+
+    // Set cap and mint up to it.
+    client.set_supply_cap(&admin, &10_0000000_i128);
+    client.mint(&minter, &alice, &10_0000000_i128);
+
+    // Attempt to exceed cap — balance must remain unchanged.
+    let balance_before = client.balance(&alice);
+    assert!(client.try_mint(&minter, &alice, &1_0000000_i128).is_err());
+    assert_eq!(client.balance(&alice), balance_before); // no state corruption
 }
