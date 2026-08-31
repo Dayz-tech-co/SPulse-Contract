@@ -1496,6 +1496,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1508,14 +1516,6 @@
                     },
                     "val": {
                       "u64": "100"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1556,6 +1556,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1568,14 +1576,6 @@
                     },
                     "val": {
                       "u64": "101"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1616,6 +1616,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1628,14 +1636,6 @@
                     },
                     "val": {
                       "u64": "102"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1676,6 +1676,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1688,14 +1696,6 @@
                     },
                     "val": {
                       "u64": "103"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1736,6 +1736,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1748,14 +1756,6 @@
                     },
                     "val": {
                       "u64": "104"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1796,6 +1796,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1808,14 +1816,6 @@
                     },
                     "val": {
                       "u64": "105"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1856,6 +1856,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1868,14 +1876,6 @@
                     },
                     "val": {
                       "u64": "106"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1916,6 +1916,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1928,14 +1936,6 @@
                     },
                     "val": {
                       "u64": "107"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -1976,6 +1976,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -1988,14 +1996,6 @@
                     },
                     "val": {
                       "u64": "108"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2036,6 +2036,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2048,14 +2056,6 @@
                     },
                     "val": {
                       "u64": "109"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2096,6 +2096,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2108,14 +2116,6 @@
                     },
                     "val": {
                       "u64": "110"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2156,6 +2156,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2168,14 +2176,6 @@
                     },
                     "val": {
                       "u64": "111"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2216,6 +2216,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2228,14 +2236,6 @@
                     },
                     "val": {
                       "u64": "112"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2276,6 +2276,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2288,14 +2296,6 @@
                     },
                     "val": {
                       "u64": "113"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2336,6 +2336,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2348,14 +2356,6 @@
                     },
                     "val": {
                       "u64": "114"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2396,6 +2396,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2408,14 +2416,6 @@
                     },
                     "val": {
                       "u64": "115"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2456,6 +2456,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2468,14 +2476,6 @@
                     },
                     "val": {
                       "u64": "116"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2516,6 +2516,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2528,14 +2536,6 @@
                     },
                     "val": {
                       "u64": "117"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2576,6 +2576,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2588,14 +2596,6 @@
                     },
                     "val": {
                       "u64": "118"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2636,6 +2636,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2648,14 +2656,6 @@
                     },
                     "val": {
                       "u64": "119"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2696,6 +2696,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2708,14 +2716,6 @@
                     },
                     "val": {
                       "u64": "120"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2756,6 +2756,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2768,14 +2776,6 @@
                     },
                     "val": {
                       "u64": "121"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2816,6 +2816,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2828,14 +2836,6 @@
                     },
                     "val": {
                       "u64": "122"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2876,6 +2876,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2888,14 +2896,6 @@
                     },
                     "val": {
                       "u64": "123"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2936,6 +2936,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -2948,14 +2956,6 @@
                     },
                     "val": {
                       "u64": "124"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -2996,6 +2996,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3008,14 +3016,6 @@
                     },
                     "val": {
                       "u64": "125"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3056,6 +3056,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3068,14 +3076,6 @@
                     },
                     "val": {
                       "u64": "126"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3116,6 +3116,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3128,14 +3136,6 @@
                     },
                     "val": {
                       "u64": "127"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3176,6 +3176,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3188,14 +3196,6 @@
                     },
                     "val": {
                       "u64": "128"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3236,6 +3236,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3248,14 +3256,6 @@
                     },
                     "val": {
                       "u64": "129"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3296,6 +3296,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3308,14 +3316,6 @@
                     },
                     "val": {
                       "u64": "130"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3356,6 +3356,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3368,14 +3376,6 @@
                     },
                     "val": {
                       "u64": "131"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3416,6 +3416,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3428,14 +3436,6 @@
                     },
                     "val": {
                       "u64": "132"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3476,6 +3476,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3488,14 +3496,6 @@
                     },
                     "val": {
                       "u64": "133"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3536,6 +3536,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3548,14 +3556,6 @@
                     },
                     "val": {
                       "u64": "134"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3596,6 +3596,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3608,14 +3616,6 @@
                     },
                     "val": {
                       "u64": "135"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3656,6 +3656,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3668,14 +3676,6 @@
                     },
                     "val": {
                       "u64": "136"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3716,6 +3716,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3728,14 +3736,6 @@
                     },
                     "val": {
                       "u64": "137"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3776,6 +3776,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3788,14 +3796,6 @@
                     },
                     "val": {
                       "u64": "138"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3836,6 +3836,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3848,14 +3856,6 @@
                     },
                     "val": {
                       "u64": "139"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3896,6 +3896,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3908,14 +3916,6 @@
                     },
                     "val": {
                       "u64": "140"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -3956,6 +3956,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -3968,14 +3976,6 @@
                     },
                     "val": {
                       "u64": "141"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4016,6 +4016,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4028,14 +4036,6 @@
                     },
                     "val": {
                       "u64": "142"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4076,6 +4076,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4088,14 +4096,6 @@
                     },
                     "val": {
                       "u64": "143"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4136,6 +4136,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4148,14 +4156,6 @@
                     },
                     "val": {
                       "u64": "144"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4196,6 +4196,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4208,14 +4216,6 @@
                     },
                     "val": {
                       "u64": "145"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4256,6 +4256,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4268,14 +4276,6 @@
                     },
                     "val": {
                       "u64": "146"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4316,6 +4316,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4328,14 +4336,6 @@
                     },
                     "val": {
                       "u64": "147"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4376,6 +4376,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4388,14 +4396,6 @@
                     },
                     "val": {
                       "u64": "148"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4436,6 +4436,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4448,14 +4456,6 @@
                     },
                     "val": {
                       "u64": "149"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4496,6 +4496,14 @@
                 "map": [
                   {
                     "key": {
+                      "symbol": "bonus_bets"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
                       "symbol": "lost_bets"
                     },
                     "val": {
@@ -4508,14 +4516,6 @@
                     },
                     "val": {
                       "u64": "1000"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "total_bets"
-                    },
-                    "val": {
-                      "u32": 1
                     }
                   },
                   {
@@ -4544,33 +4544,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 0
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADO7A2"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "1000"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4588,33 +4571,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 1
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMXIK"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "149"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4632,33 +4598,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 2
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADKPR2"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "148"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4676,33 +4625,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 3
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIHZK"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "147"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4720,33 +4652,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 4
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADH6C2"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "146"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4764,33 +4679,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 5
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADFWKK"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "145"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4808,33 +4706,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 6
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADDOT2"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "144"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4852,33 +4733,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 7
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBG3K"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "143"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4896,33 +4760,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 8
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC6RMJ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "142"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4940,33 +4787,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 9
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4ZEZ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "141"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -4984,33 +4814,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 10
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC2B5J"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "140"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5028,33 +4841,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 11
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACYJVZ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "139"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5072,33 +4868,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 12
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACXQOJ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "138"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5116,33 +4895,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 13
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACVYGZ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "137"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5160,33 +4922,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 14
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACTA7J"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "136"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5204,33 +4949,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 15
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRIXZ"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "135"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5248,33 +4976,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 16
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACOTII"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "134"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5292,33 +5003,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 17
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACM3AY"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "133"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5336,33 +5030,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 18
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACKDZI"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "132"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5380,33 +5057,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 19
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACILRY"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "131"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5424,33 +5084,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 20
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTUG7"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACHSKI"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "130"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5468,33 +5111,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 21
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABVM7P"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACF2CY"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "129"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5512,33 +5138,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 22
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABXEX7"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACDC3I"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "128"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5556,33 +5165,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 23
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABY5MP"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBKTY"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "127"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5600,33 +5192,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 24
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2VE7"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB6FV7"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "126"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5644,33 +5219,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 25
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4N5P"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4N5P"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "125"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5688,33 +5246,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 26
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB6FV7"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB2VE7"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "124"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5732,33 +5273,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 27
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACBKTY"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABY5MP"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "123"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5776,33 +5300,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 28
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACDC3I"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABXEX7"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "122"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5820,33 +5327,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 29
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACF2CY"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABVM7P"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "121"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5864,33 +5354,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 30
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACHSKI"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABTUG7"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "120"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5908,33 +5381,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 31
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACILRY"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABR4OP"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "119"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5952,33 +5408,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 32
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACKDZI"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABOHR6"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "118"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -5996,33 +5435,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 33
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACM3AY"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABMPZO"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "117"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6040,33 +5462,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 34
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACOTII"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABKXA6"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "116"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6084,33 +5489,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 35
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACRIXZ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABI7IO"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "115"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6128,33 +5516,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 36
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACTA7J"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABHGT6"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "114"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6172,33 +5543,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 37
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACVYGZ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABFO3O"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "113"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6216,33 +5570,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 38
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACXQOJ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABDWC6"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "112"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6260,33 +5597,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 39
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACYJVZ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABB6KO"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "111"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6304,33 +5624,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 40
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC2B5J"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA6J5N"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "110"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6348,33 +5651,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 41
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC4ZEZ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA4BV5"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "109"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6392,33 +5678,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 42
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAC6RMJ"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA2ZMN"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "108"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6436,33 +5705,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 43
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADBG3K"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAYRE5"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "107"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6480,33 +5732,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 44
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADDOT2"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAXI7N"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "106"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6524,33 +5759,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 45
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADFWKK"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVAX5"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "105"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6568,33 +5786,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 46
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADH6C2"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAATYON"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "104"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6612,33 +5813,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 47
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADIHZK"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAARQG5"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "103"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6656,33 +5840,16 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 48
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADKPR2"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
-                  {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
-                    }
-                  },
-                  {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "102"
-                    }
-                  }
-                ]
+                "u32": 0
               }
             }
           },
@@ -6700,33 +5867,43 @@
               "key": {
                 "vec": [
                   {
-                    "symbol": "TopPlayerAt"
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "u32": 49
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADMXIK"
                   }
                 ]
               },
               "durability": "persistent",
               "val": {
-                "map": [
+                "u32": 0
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6307200
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
                   {
-                    "key": {
-                      "symbol": "address"
-                    },
-                    "val": {
-                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4"
-                    }
+                    "symbol": "StatsEpoch"
                   },
                   {
-                    "key": {
-                      "symbol": "points"
-                    },
-                    "val": {
-                      "u64": "101"
-                    }
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADO7A2"
                   }
                 ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u32": 0
               }
             }
           },
@@ -8103,7 +7280,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 49
+                "u32": 1
               }
             }
           },
@@ -8130,7 +7307,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 48
+                "u32": 2
               }
             }
           },
@@ -8157,7 +7334,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 47
+                "u32": 3
               }
             }
           },
@@ -8184,7 +7361,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 46
+                "u32": 4
               }
             }
           },
@@ -8211,7 +7388,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 45
+                "u32": 5
               }
             }
           },
@@ -8238,7 +7415,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 44
+                "u32": 6
               }
             }
           },
@@ -8265,7 +7442,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 43
+                "u32": 7
               }
             }
           },
@@ -8292,7 +7469,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 42
+                "u32": 8
               }
             }
           },
@@ -8319,7 +7496,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 41
+                "u32": 9
               }
             }
           },
@@ -8346,7 +7523,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 40
+                "u32": 10
               }
             }
           },
@@ -8373,7 +7550,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 39
+                "u32": 11
               }
             }
           },
@@ -8400,7 +7577,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 38
+                "u32": 12
               }
             }
           },
@@ -8427,7 +7604,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 37
+                "u32": 13
               }
             }
           },
@@ -8454,7 +7631,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 36
+                "u32": 14
               }
             }
           },
@@ -8481,7 +7658,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 35
+                "u32": 15
               }
             }
           },
@@ -8508,7 +7685,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 34
+                "u32": 16
               }
             }
           },
@@ -8535,7 +7712,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 33
+                "u32": 17
               }
             }
           },
@@ -8562,7 +7739,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 32
+                "u32": 18
               }
             }
           },
@@ -8589,7 +7766,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 31
+                "u32": 19
               }
             }
           },
@@ -8616,7 +7793,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 30
+                "u32": 20
               }
             }
           },
@@ -8643,7 +7820,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 29
+                "u32": 21
               }
             }
           },
@@ -8670,7 +7847,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 28
+                "u32": 22
               }
             }
           },
@@ -8697,7 +7874,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 27
+                "u32": 23
               }
             }
           },
@@ -8724,7 +7901,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 26
+                "u32": 24
               }
             }
           },
@@ -8778,7 +7955,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 24
+                "u32": 26
               }
             }
           },
@@ -8805,7 +7982,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 23
+                "u32": 27
               }
             }
           },
@@ -8832,7 +8009,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 22
+                "u32": 28
               }
             }
           },
@@ -8859,7 +8036,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 21
+                "u32": 29
               }
             }
           },
@@ -8886,7 +8063,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 20
+                "u32": 30
               }
             }
           },
@@ -8913,7 +8090,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 19
+                "u32": 31
               }
             }
           },
@@ -8940,7 +8117,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 18
+                "u32": 32
               }
             }
           },
@@ -8967,7 +8144,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 17
+                "u32": 33
               }
             }
           },
@@ -8994,7 +8171,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 16
+                "u32": 34
               }
             }
           },
@@ -9021,7 +8198,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 15
+                "u32": 35
               }
             }
           },
@@ -9048,7 +8225,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 14
+                "u32": 36
               }
             }
           },
@@ -9075,7 +8252,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 13
+                "u32": 37
               }
             }
           },
@@ -9102,7 +8279,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 12
+                "u32": 38
               }
             }
           },
@@ -9129,7 +8306,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 11
+                "u32": 39
               }
             }
           },
@@ -9156,7 +8333,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 10
+                "u32": 40
               }
             }
           },
@@ -9183,7 +8360,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 9
+                "u32": 41
               }
             }
           },
@@ -9210,7 +8387,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 8
+                "u32": 42
               }
             }
           },
@@ -9237,7 +8414,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 7
+                "u32": 43
               }
             }
           },
@@ -9264,7 +8441,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 6
+                "u32": 44
               }
             }
           },
@@ -9291,7 +8468,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 5
+                "u32": 45
               }
             }
           },
@@ -9318,7 +8495,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 4
+                "u32": 46
               }
             }
           },
@@ -9345,7 +8522,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 3
+                "u32": 47
               }
             }
           },
@@ -9372,7 +8549,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 2
+                "u32": 48
               }
             }
           },
@@ -9399,7 +8576,7 @@
               },
               "durability": "persistent",
               "val": {
-                "u32": 1
+                "u32": 49
               }
             }
           },
@@ -9531,6 +8708,30 @@
                       },
                       "val": {
                         "u32": 50
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "TopPlayers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bytes": "0000001000000001000000320000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000370000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000003e80000000f00000003736571000000000500000000000000320000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000360000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000950000000f00000003736571000000000500000000000000310000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000350000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000940000000f00000003736571000000000500000000000000300000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000340000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000930000000f000000037365710000000005000000000000002f0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000330000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000920000000f000000037365710000000005000000000000002e0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000320000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000910000000f000000037365710000000005000000000000002d0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000310000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000900000000f000000037365710000000005000000000000002c0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000300000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008f0000000f000000037365710000000005000000000000002b0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002f0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008e0000000f000000037365710000000005000000000000002a0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002e0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008d0000000f00000003736571000000000500000000000000290000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002d0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008c0000000f00000003736571000000000500000000000000280000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002c0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008b0000000f00000003736571000000000500000000000000270000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002b0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000008a0000000f00000003736571000000000500000000000000260000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000002a0000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000890000000f00000003736571000000000500000000000000250000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000290000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000880000000f00000003736571000000000500000000000000240000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000280000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000870000000f00000003736571000000000500000000000000230000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000270000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000860000000f00000003736571000000000500000000000000220000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000260000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000850000000f00000003736571000000000500000000000000210000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000250000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000840000000f00000003736571000000000500000000000000200000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000240000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000830000000f000000037365710000000005000000000000001f0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000230000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000820000000f000000037365710000000005000000000000001e0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000220000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000810000000f000000037365710000000005000000000000001d0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000210000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000800000000f000000037365710000000005000000000000001c0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000200000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007f0000000f000000037365710000000005000000000000001b0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001f0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007e0000000f000000037365710000000005000000000000001a0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001e0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007d0000000f00000003736571000000000500000000000000190000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001d0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007c0000000f00000003736571000000000500000000000000180000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001c0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007b0000000f00000003736571000000000500000000000000170000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001b0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000007a0000000f00000003736571000000000500000000000000160000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000001a0000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000790000000f00000003736571000000000500000000000000150000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000190000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000780000000f00000003736571000000000500000000000000140000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000180000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000770000000f00000003736571000000000500000000000000130000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000170000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000760000000f00000003736571000000000500000000000000120000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000160000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000750000000f00000003736571000000000500000000000000110000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000150000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000740000000f00000003736571000000000500000000000000100000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000140000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000730000000f000000037365710000000005000000000000000f0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000130000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000720000000f000000037365710000000005000000000000000e0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000120000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000710000000f000000037365710000000005000000000000000d0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000110000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000700000000f000000037365710000000005000000000000000c0000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000100000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006f0000000f000000037365710000000005000000000000000b0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000f0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006e0000000f000000037365710000000005000000000000000a0000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000e0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006d0000000f00000003736571000000000500000000000000090000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000d0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006c0000000f00000003736571000000000500000000000000080000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000c0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006b0000000f00000003736571000000000500000000000000070000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000b0000000f0000000565706f636800000000000003000000000000000f00000006706f696e7473000000000005000000000000006a0000000f00000003736571000000000500000000000000060000001100000001000000040000000f0000000761646472657373000000001200000001000000000000000000000000000000000000000000000000000000000000000a0000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000690000000f00000003736571000000000500000000000000050000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000090000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000680000000f00000003736571000000000500000000000000040000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000080000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000670000000f00000003736571000000000500000000000000030000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000070000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000660000000f00000003736571000000000500000000000000020000001100000001000000040000000f000000076164647265737300000000120000000100000000000000000000000000000000000000000000000000000000000000060000000f0000000565706f636800000000000003000000000000000f00000006706f696e747300000000000500000000000000650000000f0000000373657100000000050000000000000001"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "TopPlayersMigrated"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": true
                       }
                     }
                   ]

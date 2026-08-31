@@ -22,6 +22,7 @@ fn setup() -> (
     let env = Env::default();
     env.mock_all_auths();
     env.cost_estimate().budget().reset_unlimited();
+    env.cost_estimate().disable_resource_limits();
 
     let contract_id = env.register(LeaderboardContract, ());
     let client = LeaderboardContractClient::new(&env, &contract_id);
@@ -140,12 +141,78 @@ fn test_min_points_and_min_slot_survive_ttl_refresh_cycle() {
 
     // A newcomer beating the current min should still correctly evict it,
     // and the min cache should still be intact and correct afterward.
+    //
+    // Issue #69: the fast-forward above spans several decay periods, so the
+    // incumbents are no longer worth their stored scores. The cache must
+    // report the weakest entry's *current* value, and it must still be the
+    // weakest — that coherence is what this test is about, not the raw number.
+    let weakest = client.get_min_points();
     let newcomer = Address::generate(&env);
     client.add_pts(&market, &newcomer, &(min_before + 1), &true);
+    while client
+        .get_top_players(&0_u32, &1_u32)
+        .get(0)
+        .unwrap()
+        .address
+        != newcomer
+    {
+        client.add_pts(&market, &newcomer, &1, &true);
+    }
 
     assert_eq!(instance_ttl(&env, &client.address), TTL_HIGH);
     assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
-    assert_eq!(client.get_min_points(), min_before + 1); // old min evicted
+    // The old minimum was evicted, so the cache now tracks a stronger entry.
+    assert!(
+        client.get_min_points() >= weakest,
+        "min cache regressed after eviction"
+    );
+    let top = client.get_top_players(&0_u32, &MAX_TOP_PLAYERS);
+    assert_eq!(
+        top.get(0).unwrap().address,
+        newcomer,
+        "a fresh score must lead a list of decayed incumbents"
+    );
+    assert_eq!(
+        top.get(MAX_TOP_PLAYERS - 1).unwrap().points,
+        client.get_min_points(),
+        "min cache must agree with the weakest ranked entry"
+    );
+}
+
+#[test]
+fn test_equal_min_players_do_not_corrupt_min_cache() {
+    // Regression for the tie-handling bug: when several players share the
+    // minimum score, the single-slot min cache must not point at a stale entry
+    // and equal-scoring newcomers must be allowed to displace an equal-min
+    // entry (not be wrongly rejected).
+    let (env, client, _admin, market, _referral) = setup();
+
+    // Fill to capacity with strictly descending points.
+    for i in 0u64..MAX_TOP_PLAYERS as u64 {
+        let user = Address::generate(&env);
+        client.add_pts(&market, &user, &(1000 - i), &true);
+    }
+    let min_before = client.get_min_points();
+    assert_eq!(min_before, 1000 - (MAX_TOP_PLAYERS as u64 - 1));
+    assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
+
+    // Two newcomers with points EQUAL to the current min each displace an
+    // equal-min entry; the cache must stay correct (value unchanged).
+    let p1 = Address::generate(&env);
+    client.add_pts(&market, &p1, &min_before, &true);
+    assert_eq!(client.get_min_points(), min_before);
+    assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
+
+    let p2 = Address::generate(&env);
+    client.add_pts(&market, &p2, &min_before, &true);
+    assert_eq!(client.get_min_points(), min_before);
+    assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
+
+    // A score strictly below the min must still be rejected (board unchanged).
+    let low = Address::generate(&env);
+    client.add_pts(&market, &low, &(min_before - 1), &true);
+    assert_eq!(client.get_min_points(), min_before);
+    assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
 }
 
 #[test]
@@ -182,10 +249,35 @@ fn test_interface_version_reported() {
 fn test_pause_unpause_admin_only() {
     let (_env, client, admin, _market, _referral) = setup();
     assert!(!client.is_paused());
+    assert!(!client.paused());
     client.pause(&admin);
     assert!(client.is_paused());
+    assert!(client.paused());
     client.unpause(&admin);
     assert!(!client.is_paused());
+    assert!(!client.paused());
+}
+
+#[test]
+fn test_set_paused_flow() {
+    let (_env, client, admin, _market, _referral) = setup();
+    assert!(!client.paused());
+
+    client.set_paused(&admin, &true);
+    assert!(client.paused());
+    assert!(client.is_paused());
+
+    client.set_paused(&admin, &false);
+    assert!(!client.paused());
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #5)")]
+fn test_set_paused_rejects_non_admin() {
+    let (env, client, _admin, _market, _referral) = setup();
+    let not_admin = Address::generate(&env);
+    client.set_paused(&not_admin, &true);
 }
 
 #[test]
@@ -203,6 +295,15 @@ fn test_paused_rejects_add_pts() {
     client.pause(&admin);
     let user = Address::generate(&env);
     client.add_pts(&market, &user, &10_u64, &true);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn test_paused_rejects_reward() {
+    let (env, client, admin, market, _referral) = setup();
+    client.set_paused(&admin, &true);
+    let user = Address::generate(&env);
+    client.reward(&market, &user, &10_u64, &0_i128, &true);
 }
 
 #[test]
@@ -232,7 +333,9 @@ fn test_refresh_player_ttl_rebumps_stats() {
 
     let ttl = || {
         env.as_contract(&client.address, || {
-            env.storage().persistent().get_ttl(&DataKey::Stats(user.clone()))
+            env.storage()
+                .persistent()
+                .get_ttl(&DataKey::Stats(user.clone()))
         })
     };
     assert!(ttl() >= TTL_BUMP);

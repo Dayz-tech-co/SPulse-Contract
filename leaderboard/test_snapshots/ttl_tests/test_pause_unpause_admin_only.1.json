@@ -32,6 +32,7 @@
       ]
     ],
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -52,6 +53,7 @@
       ]
     ],
     [],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
@@ -71,6 +73,7 @@
         }
       ]
     ],
+    [],
     []
   ],
   "ledger": {
@@ -180,6 +183,30 @@
                       },
                       "val": {
                         "u32": 0
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "TopPlayers"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bytes": "000000100000000100000000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "TopPlayersMigrated"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "bool": true
                       }
                     }
                   ]
