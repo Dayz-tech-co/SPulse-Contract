@@ -365,7 +365,6 @@ impl ReferralRegistryContract {
         }
     }
 
-
     fn require_market_contract(env: &Env, caller: &Address) -> Result<(), ReferralError> {
         let market: Address = env
             .storage()

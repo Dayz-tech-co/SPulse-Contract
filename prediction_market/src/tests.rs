@@ -80,7 +80,7 @@ fn setup() -> TestSetup {
     // Lever G: the leaderboard now mints PULSE internally (one cross-call from
     // market/referral instead of two). It must know the token AND be authorized
     // as a minter. This mirrors the exact mainnet upgrade sequence.
-    leaderboard_client.set_token_contract(&admin, &token_id);
+    leaderboard_client.set_token_contract(&admin, &token_id, &1_u32);
     token_client.set_minter(&leaderboard_id);
     // Legacy minter auths kept harmless (market/referral no longer mint directly).
     token_client.set_minter(&market_id);
@@ -1807,6 +1807,131 @@ fn test_cancel_fees_zeroed_correctly() {
     t.client.cancel_refund(&bob, &id);
 }
 
+// ── 43. Market creation guardrails (issue #55) ──────────────────────────────
+
+#[test]
+#[should_panic(expected = "Error(Contract, #27)")]
+fn test_reject_market_below_min_duration() {
+    let t = setup();
+    // Issue #55: MIN_MARKET_DURATION_SECS is 1 hour — a market that expires
+    // in minutes can be front-run and resolved before meaningful
+    // participation.
+    t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Too short"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Crypto,
+        &3599_u64,
+    );
+}
+
+#[test]
+fn test_open_market_count_tracks_creations() {
+    let t = setup();
+    assert_eq!(t.client.get_open_market_count(), 0);
+    create_test_market(&t);
+    create_test_market(&t);
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 3);
+    assert_eq!(t.client.get_market_count(), 3);
+}
+
+#[test]
+fn test_resolve_releases_open_market_slot() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let _ = create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+
+    let user = Address::generate(&t.env);
+    fund_user(&t, &user, 200_0000000);
+    t.client.place_bet(&user, &id1, &true, &50_0000000_i128);
+    advance_time(&t.env, 3601);
+    t.client.resolve_market(&t.admin, &id1, &true);
+    assert_eq!(t.client.get_open_market_count(), 1);
+
+    // The freed slot is immediately reusable.
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+}
+
+#[test]
+fn test_cancel_releases_open_market_slot() {
+    let t = setup();
+    let id1 = create_test_market(&t);
+    let _ = create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+
+    t.client.cancel_market(&t.admin, &id1);
+    assert_eq!(t.client.get_open_market_count(), 1);
+
+    create_test_market(&t);
+    assert_eq!(t.client.get_open_market_count(), 2);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #41)")]
+fn test_open_market_cap_rejects_overflow() {
+    let t = setup();
+    // The per-window rate limit (10) is tighter than the concurrency cap
+    // (50), so climb through 5 windows to fill MAX_OPEN_MARKETS.
+    for _ in 0..5u32 {
+        for i in 0..10u32 {
+            let _ = t.client.create_market(
+                &t.admin,
+                &String::from_str(&t.env, "Market"),
+                &String::from_str(&t.env, "https://x.png"),
+                &Category::Crypto,
+                &(3600_u64 + i as u64),
+            );
+        }
+        advance_ledgers(&t.env, RATE_WINDOW_LEDGERS);
+    }
+    assert_eq!(t.client.get_open_market_count(), 50);
+    // The 51st open market is rejected even with a fresh rate window — the
+    // concurrency check runs before check_rate.
+    t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Over the cap"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Sports,
+        &7200_u64,
+    );
+}
+
+#[test]
+fn test_open_market_cap_slot_released_by_cancel() {
+    let t = setup();
+    for _ in 0..5u32 {
+        for i in 0..10u32 {
+            let _ = t.client.create_market(
+                &t.admin,
+                &String::from_str(&t.env, "Market"),
+                &String::from_str(&t.env, "https://x.png"),
+                &Category::Crypto,
+                &(3600_u64 + i as u64),
+            );
+        }
+        advance_ledgers(&t.env, RATE_WINDOW_LEDGERS);
+    }
+    assert_eq!(t.client.get_open_market_count(), 50);
+
+    // Cancelling one market frees a slot immediately.
+    t.client.cancel_market(&t.admin, &1_u64);
+    assert_eq!(t.client.get_open_market_count(), 49);
+
+    // With a fresh rate window the freed slot can be used again.
+    let id = t.client.create_market(
+        &t.admin,
+        &String::from_str(&t.env, "Fresh slot"),
+        &String::from_str(&t.env, "https://x.png"),
+        &Category::Sports,
+        &7200_u64,
+    );
+    assert_eq!(id, 51);
+    assert_eq!(t.client.get_open_market_count(), 50);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 42. COMPREHENSIVE END-TO-END INTEGRATION TEST
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2411,10 +2536,10 @@ fn test_place_bet_rejects_incompatible_referral() {
     let cfg = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &fake_referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
+        &Config {
+            referral: fake_referral.clone(),
+            ..cfg.clone()
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
@@ -2480,8 +2605,17 @@ fn activate_config(
     leaderboard: &Address,
     xlm_sac: &Address,
 ) {
-    t.client
-        .set_config(&t.admin, token, referral, leaderboard, xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            token: token.clone(),
+            referral: referral.clone(),
+            leaderboard: leaderboard.clone(),
+            xlm_sac: xlm_sac.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
 }
@@ -2814,10 +2948,14 @@ fn test_set_config_is_timelocked() {
     let before = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
     );
 
     // Staged but NOT applied yet.
@@ -2846,8 +2984,13 @@ fn test_execute_set_config_before_delay_rejected() {
     // A real contract deployment must be staged: set_config validates that
     // every dependency is the expected executable kind (issue #51/#6).
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     // Too soon — the timelock has not matured.
     t.client.execute_set_config(&t.admin);
 }
@@ -2875,8 +3018,13 @@ fn test_set_config_does_not_apply_immediately() {
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
 
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 
     // Live config is unchanged until execute_set_config after the delay.
     assert_eq!(t.client.get_config().leaderboard, cfg.leaderboard);
@@ -2893,10 +3041,10 @@ fn test_set_config_rejects_arbitrary_address() {
     let attacker = Address::generate(&t.env);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &attacker,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
+        &Config {
+            referral: attacker.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -2908,10 +3056,10 @@ fn test_set_config_rejects_wasm_as_xlm_sac() {
     // A WASM/native contract must not be installable as the XLM SAC.
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.token,
+        &Config {
+            xlm_sac: cfg.token.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -2921,8 +3069,13 @@ fn test_set_config_execute_before_delay() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.execute_set_config(&t.admin);
 }
 
@@ -2931,8 +3084,13 @@ fn test_set_config_execute_after_delay_and_pin() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
 
@@ -2947,8 +3105,13 @@ fn test_cancel_set_config_during_dispute_window() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.cancel_set_config(&t.admin);
     assert!(t.client.get_pending_config().is_none());
     assert_eq!(t.client.get_config().leaderboard, cfg.leaderboard);
@@ -2964,8 +3127,13 @@ fn test_set_config_multisig_requires_threshold() {
 
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     // Only the proposer approved (1 of 2).
     t.client.execute_set_config(&t.admin);
@@ -2979,8 +3147,13 @@ fn test_cancel_set_config_removes_pending() {
     // every dependency is the expected executable kind (issue #51/#6).
     let new_lb = second_leaderboard(&t);
     let cfg = t.client.get_config();
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     assert!(t.client.get_pending_config().is_some());
 
     t.client.cancel_set_config(&t.admin);
@@ -3000,10 +3173,14 @@ fn test_set_config_rejects_non_admin() {
     let new_xlm = Address::generate(&t.env);
     t.client.set_config(
         &rando,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
     );
 }
 
@@ -3016,8 +3193,13 @@ fn test_set_config_multisig_execute_with_second_approval() {
 
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.approve_set_config(&g2);
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&g2);
@@ -3031,13 +3213,7 @@ fn test_set_config_non_governor_rejected() {
     let t = setup();
     let cfg = t.client.get_config();
     let stranger = Address::generate(&t.env);
-    t.client.set_config(
-        &stranger,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-    );
+    t.client.set_config(&stranger, &cfg);
 }
 
 fn last_event_name(env: &Env) -> Symbol {
@@ -3261,12 +3437,22 @@ fn test_set_config_rejects_duplicate_proposal() {
     // every dependency is the expected executable kind (issue #51/#6).
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 
     // A second proposal while one is pending must be rejected.
-    t.client
-        .set_config(&t.admin, &cfg.token, &cfg.referral, &new_lb, &cfg.xlm_sac);
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 }
 
 #[test]

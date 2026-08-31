@@ -110,6 +110,6 @@ jobs:
           curl -sSfL https://github.com/stellar/stellar-cli/releases/latest/download/stellar-cli-install.sh | sh
           echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Run invariant tests
-        run: cargo test --test prediction_market test_inv_ -- --nocapture
+        run: cargo test -p cross_contract_invariants test_inv_ -- --nocapture
       - name: Run referral_registry tests
-        run: cargo test --test referral_registry -- --nocapture
+        run: cargo test -p referral_registry -- --nocapture

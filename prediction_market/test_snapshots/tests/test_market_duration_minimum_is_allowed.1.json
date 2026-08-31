@@ -158,6 +158,9 @@
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                },
+                {
+                  "u32": 1
                 }
               ]
             }
@@ -249,7 +252,7 @@
                   ]
                 },
                 {
-                  "u64": "60"
+                  "u64": "3600"
                 }
               ]
             }
@@ -825,6 +828,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "ExpectedTokenVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "MarketContract"
                           }
                         ]
@@ -1110,7 +1125,7 @@
                       "symbol": "end_time"
                     },
                     "val": {
-                      "u64": "1000060"
+                      "u64": "1003600"
                     }
                   },
                   {
@@ -1216,6 +1231,22 @@
                         "map": [
                           {
                             "key": {
+                              "symbol": "expected_leaderboard_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "expected_referral_version"
+                            },
+                            "val": {
+                              "u32": 1
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "leaderboard"
                             },
                             "val": {
@@ -1307,6 +1338,18 @@
                       },
                       "val": {
                         "u64": "1"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "OpenMarketCount"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
                       }
                     },
                     {

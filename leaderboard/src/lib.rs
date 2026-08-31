@@ -198,7 +198,7 @@ impl LeaderboardContract {
     /// Set the PULSE token contract used by reward()/reward_bonus() for
     /// internal minting. Admin only. `set_token` is the pre-#23 alias.
     pub fn set_token(env: Env, admin: Address, token: Address) -> Result<(), LeaderboardError> {
-        Self::write_token_contract(&env, &admin, &token)
+        Self::write_token_contract(&env, &admin, &token, DEFAULT_TOKEN_INTERFACE_VERSION)
     }
 
     pub fn set_token_contract(
@@ -471,9 +471,14 @@ impl LeaderboardContract {
     pub fn get_points(env: Env, user: Address) -> u64 {
         let pts = Self::decayed_stats(&env, &user).points;
         // Issue #166: extend TTL on read so idle player stats cannot expire
-        // while a user is checking their score.
+        // while a user is checking their score. Only bump when the key
+        // exists — a user who never accrued points must read 0, not panic.
         let key = DataKey::Stats(user);
-        env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
         pts
     }
 
@@ -482,8 +487,14 @@ impl LeaderboardContract {
     pub fn get_stats(env: Env, user: Address) -> PlayerStats {
         let stats = Self::decayed_stats(&env, &user);
         // Issue #166: extend TTL on read so idle player stats cannot expire.
+        // Only bump when the key exists — an unregistered user must read
+        // zeroed stats, not panic on extend_ttl of a missing key.
         let key = DataKey::Stats(user);
-        env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        if env.storage().persistent().has(&key) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        }
         stats
     }
 
@@ -845,6 +856,11 @@ impl LeaderboardContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::TokenContract, token);
+        // Issue #170: record the expected token ABI version so
+        // require_compatible_token can enforce it at reward time.
+        env.storage()
+            .instance()
+            .set(&DataKey::ExpectedTokenVersion, &expected_version);
         env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         Ok(())
     }

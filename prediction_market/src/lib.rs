@@ -37,7 +37,17 @@ const MAX_BETS_PER_USER: u32 = 20;
 // timestamps, which can regress and previously underflowed here.
 const RATE_WINDOW_LEDGERS: u32 = 720; // ≈1h of ledgers at ~5s per ledger
 const MAX_MARKETS_PER_WINDOW: u32 = 10;
-const MIN_MARKET_DURATION_SECS: u64 = 60; // issue #10: no instantly-expired markets
+// Issues #10/#55: no instantly-expired or impractically short markets. A
+// market must stay open long enough for meaningful participation, so the
+// floor is 1 hour — an admin can no longer create a market that expires in
+// seconds, front-run a bet, and resolve it.
+const MIN_MARKET_DURATION_SECS: u64 = 3600;
+// Issue #55: cap on concurrently open markets (created but not yet resolved
+// or cancelled). Complements the per-window rate limit with a concurrency
+// bound, so an admin cannot flood the market list with garbage markets that
+// degrade the UI and get_market_count-based indexers. Expired-but-unresolved
+// markets still count until resolved/cancelled, forcing cleanup.
+const MAX_OPEN_MARKETS: u32 = 50;
 const MAX_BETTORS_PER_PAGE: u32 = 100;
 /// Sentinel market id for the unattributed pre-upgrade fee balance (#57).
 const LEGACY_MARKET_ID: u64 = 0;
@@ -153,6 +163,9 @@ pub enum MarketError {
     /// Registered resolver attempted to bet, or tried to resolve a market they
     /// have a stake in (issue #3 collusion guard).
     ResolverConflict = 40,
+    /// Issue #55: too many concurrently open markets — resolve or cancel some
+    /// before creating more.
+    TooManyOpenMarkets = 41,
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -163,6 +176,8 @@ pub enum DataKey {
     // Config addresses — all in instance storage (shared, cheap)
     Cfg, // single packed Config struct — 1 read instead of 5
     MarketCount,
+    // Issue #55: u32 count of markets currently open (created, unresolved).
+    OpenMarketCount,
     AccumulatedFees,
     Market(u64),
     // Per-market ledger of the fees this market actually contributed to
@@ -423,27 +438,18 @@ impl PredictionMarketContract {
         Ok(())
     }
 
-    /// Stage a config change (token / referral / leaderboard / xlm_sac). Admin
-    /// only. The change does NOT take effect immediately: it must mature past
-    /// CONFIG_DELAY_SECS via execute_set_config, giving off-chain
-    /// monitors time to detect it (via the ConfigChangeStaged event) and the
-    /// admin time to cancel it with cancel_set_config (issue #93).
-    /// Propose a Config change. Does **not** take effect immediately.
+    /// Propose a Config change (token / referral / leaderboard / xlm_sac +
+    /// expected ABI versions). Governor only. Does **not** take effect
+    /// immediately: it must mature past `CONFIG_DELAY_SECS` via
+    /// `execute_set_config`, giving off-chain monitors time to detect it (via
+    /// the ConfigChangeStaged event) and any governor time to cancel it with
+    /// `cancel_set_config` (issue #93).
     ///
     /// Live WASM hashes are read on-chain (not caller-supplied), the
     /// proposal is emitted for monitors, and it only becomes active after
     /// `CONFIG_DELAY_SECS` **and** `GovernorThreshold` approvals via
     /// `execute_set_config`. Any governor can `cancel_set_config` in between.
-    pub fn set_config(
-        env: Env,
-        caller: Address,
-        token_contract: Address,
-        referral_contract: Address,
-        leaderboard_contract: Address,
-        xlm_sac: Address,
-        expected_referral_version: u32,
-        expected_leaderboard_version: u32,
-    ) -> Result<(), MarketError> {
+    pub fn set_config(env: Env, caller: Address, cfg: Config) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
         if env.storage().instance().has(&DataKey::PendingConfig) {
@@ -452,22 +458,15 @@ impl PredictionMarketContract {
 
         let hashes = Self::fingerprint_config(
             &env,
-            &token_contract,
-            &referral_contract,
-            &leaderboard_contract,
-            &xlm_sac,
+            &cfg.token,
+            &cfg.referral,
+            &cfg.leaderboard,
+            &cfg.xlm_sac,
         )?;
         let mut approvers: Vec<Address> = Vec::new(&env);
         approvers.push_back(caller.clone());
         let pending = PendingConfigChange {
-            cfg: Config {
-                token: token_contract,
-                referral: referral_contract,
-                leaderboard: leaderboard_contract,
-                xlm_sac,
-                expected_referral_version,
-                expected_leaderboard_version,
-            },
+            cfg: cfg.clone(),
             hashes,
             requested_at: env.ledger().timestamp(),
             approvers,
@@ -860,6 +859,17 @@ impl PredictionMarketContract {
         if duration_secs < MIN_MARKET_DURATION_SECS {
             return Err(MarketError::InvalidDuration);
         }
+        // Issue #55: bound concurrent open markets so garbage markets cannot
+        // flood the UI/indexers. Checked before check_rate so a rejected
+        // creation does not consume a rate-limit slot.
+        let open_markets: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OpenMarketCount)
+            .unwrap_or(0);
+        if open_markets >= MAX_OPEN_MARKETS {
+            return Err(MarketError::TooManyOpenMarkets);
+        }
         Self::check_rate(&env)?;
 
         // OPT: single instance read for count (was already one read)
@@ -895,6 +905,10 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .set(&DataKey::MarketCount, &market_id);
+        // Issue #55: this market is now open — account it against the cap.
+        env.storage()
+            .instance()
+            .set(&DataKey::OpenMarketCount, &(open_markets + 1));
 
         env.events().publish(
             (
@@ -1352,6 +1366,8 @@ impl PredictionMarketContract {
         env.storage()
             .persistent()
             .extend_ttl(&mkt_key, TTL_BUMP, TTL_HIGH);
+        // Issue #55: the market is closed — release its open-market slot.
+        Self::decrement_open_markets(&env);
         // Issue #178: no stored global counter — total is always derived.
         let acc_fees = Self::compute_total_proven_fees(&env);
         env.events().publish(
@@ -1468,6 +1484,8 @@ impl PredictionMarketContract {
         let mkt_key = DataKey::Market(market_id);
         env.storage().persistent().set(&mkt_key, &market);
         let _ = Self::refresh_market_keys(&env, market_id);
+        // Issue #55: the market is closed — release its open-market slot.
+        Self::decrement_open_markets(&env);
 
         // Issue #178: reclaim the full per-market ledger balance.
         // Each market's fee ledger is isolated, so the balance only contains
@@ -1894,7 +1912,9 @@ impl PredictionMarketContract {
             .ok_or(MarketError::NoBetFound)?;
         // Issue #166: extend TTL on read so claimable bet data cannot expire
         // while a user is inspecting it.
-        env.storage().persistent().extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
+        env.storage()
+            .persistent()
+            .extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
         Ok(Bet {
             amount: e.net_yes.max(e.net_no),
             is_yes: e.net_yes >= e.net_no,
@@ -1922,6 +1942,16 @@ impl PredictionMarketContract {
         env.storage()
             .instance()
             .get(&DataKey::MarketCount)
+            .unwrap_or(0)
+    }
+
+    /// Issue #55: number of markets currently open (created, not yet resolved
+    /// or cancelled). Expired-but-unresolved markets still count until they
+    /// are resolved or cancelled.
+    pub fn get_open_market_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::OpenMarketCount)
             .unwrap_or(0)
     }
 
@@ -2033,11 +2063,7 @@ impl PredictionMarketContract {
 
     pub fn get_payout(env: Env, market_id: u64, user: Address) -> i128 {
         let key = DataKey::Payout(market_id, user);
-        let val: i128 = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(0);
+        let val: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         Self::bump_if_present(&env, &key);
         val
     }
@@ -2051,7 +2077,9 @@ impl PredictionMarketContract {
         // Issue #166: extend TTL on read so fee ledger data cannot expire.
         if market_id != LEGACY_MARKET_ID {
             let key = DataKey::MarketFees(market_id);
-            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         }
         fees
     }
@@ -2562,6 +2590,20 @@ impl PredictionMarketContract {
     // wall-clock time. Ledger sequences are strictly monotonic on any Soroban
     // network, so timestamp regressions can neither underflow the elapsed
     // computation nor reset an active rate-limit window.
+    // Issue #55: a resolved/cancelled market releases its concurrency slot.
+    // saturating_sub guards against legacy markets that predate the counter.
+    #[inline]
+    fn decrement_open_markets(env: &Env) {
+        let open: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::OpenMarketCount)
+            .unwrap_or(0);
+        env.storage()
+            .instance()
+            .set(&DataKey::OpenMarketCount, &open.saturating_sub(1));
+    }
+
     fn check_rate(env: &Env) -> Result<(), MarketError> {
         let seq = env.ledger().sequence();
         // (window_start_seq, count) — 1 read, cheap tuple serialization

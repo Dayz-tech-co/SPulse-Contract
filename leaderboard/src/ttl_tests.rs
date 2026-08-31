@@ -109,7 +109,7 @@ fn test_set_token_contract_refreshes_instance_ttl_when_below_threshold() {
     assert!(instance_ttl(&env, &client.address) < TTL_BUMP);
 
     let token = Address::generate(&env);
-    client.set_token_contract(&admin, &token);
+    client.set_token_contract(&admin, &token, &1_u32);
 
     assert_eq!(instance_ttl(&env, &client.address), TTL_HIGH);
 }

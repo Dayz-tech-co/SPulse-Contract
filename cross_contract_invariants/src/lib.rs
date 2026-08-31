@@ -85,7 +85,7 @@ fn cross_setup() -> CrossContractSetup {
     leaderboard.initialize(&admin, &market_id, &referral_id);
     referral.initialize(&admin, &market_id, &token_id, &leaderboard_id, &xlm_sac_id);
 
-    leaderboard.set_token_contract(&admin, &token_id);
+    leaderboard.set_token_contract(&admin, &token_id, &1_u32);
     token.set_minter(&leaderboard_id);
     token.set_minter(&market_id);
     token.set_minter(&referral_id);
