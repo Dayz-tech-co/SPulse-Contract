@@ -70,7 +70,12 @@ fn instance_ttl(env: &Env, contract: &Address) -> u32 {
 }
 
 /// Mint `amount` to `to` and return the authorized minter.
-fn mint_to(client: &PULSETokenContractClient<'_>, env: &Env, to: &Address, amount: i128) -> Address {
+fn mint_to(
+    client: &PULSETokenContractClient<'_>,
+    env: &Env,
+    to: &Address,
+    amount: i128,
+) -> Address {
     let minter = Address::generate(env);
     client.set_minter(&minter);
     client.mint(&minter, to, &amount);
@@ -411,24 +416,6 @@ fn test_paused_rejects_mint() {
 
 #[test]
 #[should_panic(expected = "Error(Contract, #9)")]
-fn test_paused_rejects_transfer() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let client = setup(&env);
-    let admin = init(&env, &client);
-
-    let minter = Address::generate(&env);
-    client.set_minter(&minter);
-    let alice = Address::generate(&env);
-    let bob = Address::generate(&env);
-    client.mint(&minter, &alice, &50_0000000_i128);
-
-    client.pause(&admin);
-    client.transfer(&alice, &bob, &10_0000000_i128);
-}
-
-#[test]
-#[should_panic(expected = "Error(Contract, #9)")]
 fn test_paused_rejects_burn() {
     let env = Env::default();
     env.mock_all_auths();
@@ -562,6 +549,76 @@ fn test_pause_requires_admin() {
     client.set_paused(&rando, &true);
 }
 
+#[test]
+fn test_set_paused_flow() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    assert!(!client.paused());
+    client.set_paused(&admin, &true);
+    assert!(client.paused());
+    assert!(client.is_paused());
+
+    client.set_paused(&admin, &false);
+    assert!(!client.paused());
+    assert!(!client.is_paused());
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let minter = Address::generate(&env);
+    client.set_minter(&minter);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    client.mint(&minter, &alice, &50_0000000_i128);
+
+    client.set_paused(&admin, &true);
+    client.transfer(&alice, &bob, &10_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_transfer_from() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let minter = Address::generate(&env);
+    client.set_minter(&minter);
+    let alice = Address::generate(&env);
+    let bob = Address::generate(&env);
+    let spender = Address::generate(&env);
+    client.mint(&minter, &alice, &50_0000000_i128);
+    client.approve(&alice, &spender, &20_0000000_i128, &1000);
+
+    client.set_paused(&admin, &true);
+    client.transfer_from(&spender, &alice, &bob, &10_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn test_paused_rejects_approve() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let client = setup(&env);
+    let admin = init(&env, &client);
+
+    let alice = Address::generate(&env);
+    let spender = Address::generate(&env);
+
+    client.set_paused(&admin, &true);
+    client.approve(&alice, &spender, &20_0000000_i128, &1000);
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 //  Issue #97 — extend TTL on storage keys
 // ══════════════════════════════════════════════════════════════════════════════
@@ -615,7 +672,10 @@ fn test_burn_extends_ttl_on_remaining_balance() {
     advance_ledgers(&env, 4_000_000);
 
     let before = balance_ttl(&env, &client.address, &alice);
-    assert!(before < TTL_BUMP, "setup invariant broken: TTL ({before}) should be below TTL_BUMP");
+    assert!(
+        before < TTL_BUMP,
+        "setup invariant broken: TTL ({before}) should be below TTL_BUMP"
+    );
 
     // A partial burn leaves a live balance behind — that remainder needs its
     // TTL refreshed just as much as a transfer's does.
@@ -643,7 +703,12 @@ fn test_transfer_from_extends_ttl_on_both_balance_keys() {
 
     advance_ledgers(&env, 4_000_000);
     // Approve *after* the fast-forward so the allowance itself is still live.
-    client.approve(&alice, &spender, &1_000_0000000_i128, &(env.ledger().sequence() + 1_000));
+    client.approve(
+        &alice,
+        &spender,
+        &1_000_0000000_i128,
+        &(env.ledger().sequence() + 1_000),
+    );
 
     let alice_before = balance_ttl(&env, &client.address, &alice);
     let bob_before = balance_ttl(&env, &client.address, &bob);

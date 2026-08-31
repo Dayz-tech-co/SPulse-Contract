@@ -86,7 +86,10 @@ fn test_penalize_rejects_non_market_caller() {
     let rando = Address::generate(&env);
     client.add_pts(&market, &user, &50_u64, &true);
     let result = client.try_penalize(&rando, &user, &10_u64);
-    assert!(result.is_err(), "penalize should reject a non-market caller");
+    assert!(
+        result.is_err(),
+        "penalize should reject a non-market caller"
+    );
     // The player's balance must be untouched by the rejected call.
     assert_eq!(client.get_points(&user), 50);
 }
@@ -97,7 +100,10 @@ fn test_penalize_rejects_zero_points() {
     let user = Address::generate(&env);
     client.add_pts(&market, &user, &50_u64, &true);
     let result = client.try_penalize(&market, &user, &0_u64);
-    assert!(result.is_err(), "penalize should reject a zero-point deduction");
+    assert!(
+        result.is_err(),
+        "penalize should reject a zero-point deduction"
+    );
 }
 
 #[test]
@@ -107,7 +113,10 @@ fn test_penalize_rejects_banned_player() {
     client.add_pts(&market, &user, &50_u64, &true);
     client.ban_player(&admin, &user);
     let result = client.try_penalize(&market, &user, &10_u64);
-    assert!(result.is_err(), "penalize must reject a banned player like every other accrual path");
+    assert!(
+        result.is_err(),
+        "penalize must reject a banned player like every other accrual path"
+    );
 }
 
 #[test]
@@ -132,9 +141,18 @@ fn test_penalize_does_not_touch_activity_counters() {
 
     let after = client.get_stats(&user);
     assert_eq!(after.points, before.points - 15);
-    assert_eq!(after.won_bets, before.won_bets, "penalize must not touch won_bets");
-    assert_eq!(after.lost_bets, before.lost_bets, "penalize must not touch lost_bets");
-    assert_eq!(after.total_bets, before.total_bets, "penalize must not touch total_bets");
+    assert_eq!(
+        after.won_bets, before.won_bets,
+        "penalize must not touch won_bets"
+    );
+    assert_eq!(
+        after.lost_bets, before.lost_bets,
+        "penalize must not touch lost_bets"
+    );
+    assert_eq!(
+        after.total_bets, before.total_bets,
+        "penalize must not touch total_bets"
+    );
 }
 
 #[test]
@@ -148,7 +166,10 @@ fn test_penalize_is_decay_aware() {
 
     advance_periods(&env, 3);
     let decayed_before_penalty = client.get_points(&user);
-    assert!(decayed_before_penalty < 1_000, "score should have decayed by now");
+    assert!(
+        decayed_before_penalty < 1_000,
+        "score should have decayed by now"
+    );
 
     client.penalize(&market, &user, &50_u64);
 
@@ -197,7 +218,11 @@ fn test_penalize_min_cache_stays_correct_after_reordering() {
     client.penalize(&market, &a, &250_u64); // a: 300 -> 50, now the weakest
 
     assert_eq!(client.get_points(&a), 50);
-    assert_eq!(client.get_min_points(), 50, "min cache must track the new weakest entry");
+    assert_eq!(
+        client.get_min_points(),
+        50,
+        "min cache must track the new weakest entry"
+    );
 }
 
 #[test]
@@ -237,7 +262,11 @@ fn test_penalize_never_evicts_a_ranked_player_on_an_unranked_players_behalf() {
     client.penalize(&market, &never_ranked, &10_u64);
 
     assert_eq!(client.get_top_player_count(), MAX_TOP_PLAYERS);
-    assert_eq!(client.get_min_points(), min_before, "a penalty on an outsider must not touch the list");
+    assert_eq!(
+        client.get_min_points(),
+        min_before,
+        "a penalty on an outsider must not touch the list"
+    );
     assert_eq!(client.get_rank(&never_ranked), UNRANKED_RANK);
 }
 

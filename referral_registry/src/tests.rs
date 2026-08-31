@@ -1,14 +1,14 @@
 use super::*;
 use soroban_sdk::{
-    contract, contractimpl,
-    testutils::{Address as _, Events, Ledger, LedgerInfo},
+    testutils::{Address as _, Ledger, LedgerInfo},
     token::{Client as TokenClient, StellarAssetClient},
-    Address, Env, String, Symbol,
+    Address, Env, String, Vec,
 };
 
 use leaderboard::LeaderboardContract;
 use pulse_token::PULSETokenContract;
 
+#[allow(dead_code)]
 struct TestSetup {
     env: Env,
     client: ReferralRegistryContractClient<'static>,
@@ -70,7 +70,7 @@ fn setup() -> TestSetup {
     leaderboard_client.initialize(&admin, &market, &referral_id);
     client.initialize(&admin, &market, &token_id, &leaderboard_id, &xlm_sac_id);
 
-    leaderboard_client.set_token_contract(&admin, &token_id);
+    leaderboard_client.set_token_contract(&admin, &token_id, &pulse_token::INTERFACE_VERSION);
     token_client.set_minter(&leaderboard_id);
     token_client.set_minter(&referral_id);
     token_client.set_minter(&market);
@@ -90,6 +90,13 @@ fn setup() -> TestSetup {
 }
 
 #[test]
+fn test_initialize() {
+    let t = setup();
+    assert_eq!(t.client.interface_version(), 1);
+    assert!(!t.client.is_paused());
+}
+
+#[test]
 fn test_register_referral_without_referrer() {
     let t = setup();
     let user = Address::generate(&t.env);
@@ -101,7 +108,10 @@ fn test_register_referral_without_referrer() {
     );
 
     assert_eq!(t.client.get_referrer(&user), None);
-    assert_eq!(t.client.get_display_name(&user), Some(String::from_str(&t.env, "User")));
+    assert_eq!(
+        t.client.get_display_name(&user),
+        Some(String::from_str(&t.env, "User"))
+    );
 }
 
 #[test]
@@ -149,7 +159,10 @@ fn test_credit_with_referrer_pays_referrer() {
     let paid = t.client.credit(&t.market, &user, &referral_fee);
     assert_eq!(paid, true);
 
-    assert_eq!(t.xlm.balance(&referrer), referrer_balance_before + referral_fee);
+    assert_eq!(
+        t.xlm.balance(&referrer),
+        referrer_balance_before + referral_fee
+    );
     assert_eq!(t.client.get_earnings(&referrer), referral_fee);
 }
 
@@ -207,6 +220,10 @@ fn test_register_referral_rejects_unregistered_referrer() {
         &String::from_str(&t.env, "Referrer"),
         &Option::<Address>::None,
     );
+
+    // Now that referrer exists, user can attach them (one-time upgrade from
+    // no-referrer -> has-referrer; register_referral rejected Some(referrer)
+    // earlier only because referrer wasn't registered yet).
     t.client.register_referral(
         &user,
         &String::from_str(&t.env, "User"),
@@ -279,15 +296,17 @@ fn test_referral_depth_limit() {
     );
 
     // referral_depth(ref_addr) counts hops from ref_addr back to the chain
-    // root, and register_referral rejects when that count is already
-    // >= MAX_REFERRAL_DEPTH. Registering users[1..=max_depth] builds a chain
-    // where users[max_depth] sits at depth == max_depth - 1; the rejection
-    // only fires one link further, when depth reaches max_depth exactly --
-    // i.e. on the (max_depth + 1)th registration, not the max_depth-th.
-    for i in 1..=(max_depth + 1) {
+    // root: users[0] (no referrer) sits at depth 0, and each subsequent
+    // registration in this chain is one hop deeper, so users[k] sits at
+    // depth == k. register_referral rejects a new registration once its
+    // cited referrer's depth + 1 >= MAX_REFERRAL_DEPTH. At loop iteration i,
+    // the referrer is users[i-1], at depth i-1, so the check becomes
+    // i >= MAX_REFERRAL_DEPTH -- i.e. rejection first fires exactly at
+    // i == max_depth (the max_depth-th registration), not one hop later.
+    for i in 1..=max_depth {
         let referrer = users.get((i - 1) as u32).unwrap();
         let user = users.get(i as u32).unwrap();
-        if i == max_depth + 1 {
+        if i == max_depth {
             let result = t.client.try_register_referral(
                 &user,
                 &String::from_str(&t.env, "U"),
@@ -311,6 +330,7 @@ fn test_pause_unpause() {
 
     t.client.pause(&t.admin);
     assert!(t.client.is_paused());
+    assert!(t.client.paused());
 
     let result = t.client.try_register_referral(
         &user,
@@ -321,6 +341,7 @@ fn test_pause_unpause() {
 
     t.client.unpause(&t.admin);
     assert!(!t.client.is_paused());
+    assert!(!t.client.paused());
 
     t.client.register_referral(
         &user,
@@ -328,4 +349,44 @@ fn test_pause_unpause() {
         &Option::<Address>::None,
     );
     assert_eq!(t.client.get_referrer(&user), None);
+}
+
+#[test]
+fn test_set_paused_flow() {
+    let t = setup();
+    assert!(!t.client.paused());
+
+    t.client.set_paused(&t.admin, &true);
+    assert!(t.client.paused());
+    assert!(t.client.is_paused());
+
+    let user = Address::generate(&t.env);
+    let reg_result = t.client.try_register_referral(
+        &user,
+        &String::from_str(&t.env, "User"),
+        &Option::<Address>::None,
+    );
+    assert!(reg_result.is_err());
+
+    let cred_result = t.client.try_credit(&t.market, &user, &100_i128);
+    assert!(cred_result.is_err());
+
+    t.client.set_paused(&t.admin, &false);
+    assert!(!t.client.paused());
+}
+
+#[test]
+fn test_set_paused_rejects_non_admin() {
+    let t = setup();
+    let rando = Address::generate(&t.env);
+    let result = t.client.try_set_paused(&rando, &true);
+    assert!(result.is_err());
+}
+
+#[test]
+fn test_set_token_contract() {
+    let t = setup();
+    let new_token = Address::generate(&t.env);
+
+    t.client.set_token_contract(&t.admin, &new_token);
 }
