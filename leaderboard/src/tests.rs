@@ -1738,3 +1738,172 @@ fn test_reward_zero_tokens_succeeds_without_token() {
     client.reward(&market, &user, &30_u64, &0_i128, &true);
     assert_eq!(client.get_points(&user), 30);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Issue #18 — one settled-bet implementation, one accountable minting path
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// `reward` and `add_pts` are both market-authorized and both record a settled
+// bet. They used to be two separate copies of that bookkeeping, differing only
+// in that `reward` minted — so the same user action moved token supply
+// differently depending on which symbol the caller reached for, and since both
+// wrote byte-identical stats, storage kept no trace of which had run.
+//
+// Two properties are pinned here:
+//   1. The two entry points are the same code. `add_pts` is `settle_bet` with
+//      `tokens = 0`, so they cannot drift.
+//   2. Every mint, from any path, is tallied — so points and supply can be
+//      reconciled after the fact, which the issue notes was impossible.
+
+#[test]
+fn test_add_pts_and_reward_with_zero_tokens_record_identically() {
+    // If these two ever diverge again, this fails. Same points, same win/loss
+    // bookkeeping, same (absent) mint.
+    let (env, client, _admin, market, _referral, token_client) = setup_with_token();
+    let via_add_pts = Address::generate(&env);
+    let via_reward = Address::generate(&env);
+
+    client.add_pts(&market, &via_add_pts, &100_u64, &true);
+    client.reward(&market, &via_reward, &100_u64, &0_i128, &true);
+
+    let a = client.get_stats(&via_add_pts);
+    let b = client.get_stats(&via_reward);
+    assert_eq!(a.points, b.points);
+    assert_eq!(a.won_bets, b.won_bets);
+    assert_eq!(a.lost_bets, b.lost_bets);
+    assert_eq!(a.total_bets, b.total_bets);
+    assert_eq!(
+        client.get_minted(&via_add_pts),
+        client.get_minted(&via_reward)
+    );
+    assert_eq!(token_client.total_supply(), 0);
+
+    // Same again for a loss, so the is_won branch is covered too.
+    client.add_pts(&market, &via_add_pts, &10_u64, &false);
+    client.reward(&market, &via_reward, &10_u64, &0_i128, &false);
+    assert_eq!(
+        client.get_stats(&via_add_pts).lost_bets,
+        client.get_stats(&via_reward).lost_bets
+    );
+}
+
+#[test]
+fn test_every_mint_is_recorded_against_the_player() {
+    let (env, client, _admin, market, _referral, token_client) = setup_with_token();
+    let user = Address::generate(&env);
+
+    assert_eq!(client.get_minted(&user), 0);
+    client.reward(&market, &user, &30_u64, &10_0000000_i128, &true);
+
+    assert_eq!(client.get_minted(&user), 10_0000000_i128);
+    assert_eq!(client.get_minted(&user), token_client.balance(&user));
+
+    // A second settled bet accumulates rather than overwriting.
+    client.reward(&market, &user, &30_u64, &2_0000000_i128, &false);
+    assert_eq!(client.get_minted(&user), 12_0000000_i128);
+    assert_eq!(client.get_minted(&user), token_client.balance(&user));
+}
+
+#[test]
+fn test_add_pts_records_a_bet_and_mints_nothing() {
+    // Its documented behaviour is preserved exactly — this is the legacy
+    // contract callers rely on.
+    let (env, client, _admin, market, _referral, token_client) = setup_with_token();
+    let user = Address::generate(&env);
+
+    client.add_pts(&market, &user, &100_u64, &true);
+
+    assert_eq!(client.get_points(&user), 100);
+    assert_eq!(client.get_stats(&user).won_bets, 1);
+    assert_eq!(client.get_minted(&user), 0);
+    assert_eq!(token_client.total_supply(), 0);
+}
+
+#[test]
+fn test_minted_ledger_reconciles_with_token_supply_across_every_path() {
+    // The invariant the issue asks for. Exercise every way this contract can
+    // put PULSE into circulation — the immediate market path, the immediate
+    // referral path, the deferred queue/claim path, and the two non-minting
+    // legacy entry points — then check the contract's own tally against what
+    // the token actually issued.
+    let (env, client, _admin, market, referral, token_client) = setup_with_token();
+
+    let a = Address::generate(&env);
+    let b = Address::generate(&env);
+    let c = Address::generate(&env);
+    let d = Address::generate(&env);
+
+    client.reward(&market, &a, &30_u64, &10_0000000_i128, &true);
+    client.add_pts(&market, &b, &10_u64, &false); // no mint
+    client.reward_bonus(&referral, &c, &50_u64, &3_0000000_i128);
+    client.add_bonus_pts(&referral, &d, &5_u64); // no mint
+
+    // Deferred path: queued now, minted at claim time.
+    client.queue_reward(&market, &a, &30_u64, &7_0000000_i128, &true);
+    client.claim_pending_rewards(&a);
+
+    let tallied = client.get_minted(&a)
+        + client.get_minted(&b)
+        + client.get_minted(&c)
+        + client.get_minted(&d);
+
+    assert_eq!(
+        tallied,
+        token_client.total_supply(),
+        "the leaderboard's mint tally must account for every PULSE it issued"
+    );
+    // And it agrees per-player with the token's own books.
+    for who in [&a, &b, &c, &d] {
+        assert_eq!(client.get_minted(who), token_client.balance(who));
+    }
+    // The non-minting entry points contributed points but no supply.
+    assert_eq!(client.get_minted(&b), 0);
+    assert_eq!(client.get_minted(&d), 0);
+    assert_eq!(client.get_points(&b), 10);
+    assert_eq!(client.get_points(&d), 5);
+}
+
+#[test]
+fn test_deferred_claim_is_counted_in_the_mint_ledger() {
+    // queue_reward mints nothing at queue time; the tally must move only when
+    // the claim actually mints, so a pending reward is never counted twice.
+    let (env, client, _admin, market, _referral, token_client) = setup_with_token();
+    let user = Address::generate(&env);
+
+    client.queue_reward(&market, &user, &30_u64, &5_0000000_i128, &true);
+    assert_eq!(client.get_minted(&user), 0, "queueing must not mint");
+    assert_eq!(token_client.total_supply(), 0);
+
+    client.claim_pending_rewards(&user);
+    assert_eq!(client.get_minted(&user), 5_0000000_i128);
+    assert_eq!(token_client.total_supply(), 5_0000000_i128);
+
+    // Claiming again finds nothing pending and must not inflate the tally.
+    client.claim_pending_rewards(&user);
+    assert_eq!(client.get_minted(&user), 5_0000000_i128);
+    assert_eq!(token_client.total_supply(), 5_0000000_i128);
+}
+
+#[test]
+fn test_add_pts_still_enforces_the_ban_list_after_delegation() {
+    // Routing through settle_bet must not drop any guard the legacy path had.
+    let (env, client, admin, market, _referral, _token) = setup_with_token();
+    let user = Address::generate(&env);
+    client.ban_player(&admin, &user);
+
+    assert_eq!(
+        client.try_add_pts(&market, &user, &100_u64, &true),
+        Err(Ok(LeaderboardError::PlayerBanned))
+    );
+    assert_eq!(client.get_points(&user), 0);
+}
+
+#[test]
+fn test_add_pts_still_rejects_a_non_market_caller_after_delegation() {
+    let (env, client, _admin, _market, referral, _token) = setup_with_token();
+    let user = Address::generate(&env);
+    assert_eq!(
+        client.try_add_pts(&referral, &user, &100_u64, &true),
+        Err(Ok(LeaderboardError::UnauthorizedCaller))
+    );
+}
