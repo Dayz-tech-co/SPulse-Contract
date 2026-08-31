@@ -1377,6 +1377,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "ExpectedTokenVersion"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "u32": 1
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "MarketContract"
                           }
                         ]

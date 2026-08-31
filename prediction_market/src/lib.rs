@@ -440,6 +440,13 @@ impl PredictionMarketContract {
     /// proposal is emitted for monitors, and it only becomes active after
     /// `CONFIG_DELAY_SECS` **and** `GovernorThreshold` approvals via
     /// `execute_set_config`. Any governor can `cancel_set_config` in between.
+    // Issue #170 added expected_referral_version/expected_leaderboard_version,
+    // crossing clippy's default 7-arg threshold. Every parameter here is a
+    // distinct, meaningful part of the public contract ABI (issue #84 pins
+    // this exact call shape for cross-contract version checks) -- bundling
+    // them into a struct would be a real ABI-breaking change, not a
+    // drive-by cleanup to make as part of restoring buildability.
+    #[allow(clippy::too_many_arguments)]
     pub fn set_config(
         env: Env,
         caller: Address,

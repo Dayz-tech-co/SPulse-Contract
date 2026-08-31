@@ -883,6 +883,13 @@ impl LeaderboardContract {
         }
         admin.require_auth();
         env.storage().instance().set(&DataKey::TokenContract, token);
+        // Issue #170: persist the expected ABI version alongside the token
+        // address itself, so require_compatible_token's read of
+        // DataKey::ExpectedTokenVersion actually reflects what was
+        // configured here instead of always falling back to the default.
+        env.storage()
+            .instance()
+            .set(&DataKey::ExpectedTokenVersion, &expected_version);
         env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         Ok(())
     }
@@ -1039,7 +1046,7 @@ impl LeaderboardContract {
         }
         env.storage().instance().extend_ttl(TTL_BUMP, TTL_HIGH);
         env.events().publish(
-            (Symbol::new(&env, "leaderboard_penalized"), user.clone()),
+            (Symbol::new(env, "leaderboard_penalized"), user.clone()),
             s.points,
         );
     }
