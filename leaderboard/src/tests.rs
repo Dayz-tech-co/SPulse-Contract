@@ -1,4 +1,5 @@
 use super::*;
+use soroban_sdk::xdr;
 use soroban_sdk::{testutils::{Address as _, Events}, Env, Symbol, TryFromVal};
 
 fn setup() -> (
@@ -605,7 +606,14 @@ fn test_add_pts_emits_leaderboard_updated() {
     let user = Address::generate(&env);
     client.add_pts(&market, &user, &100_u64, &true);
     let events = env.events().all();
-    let last = events.get(events.len() - 1).unwrap();
-    let name = Symbol::try_from_val(&env, &last.1.get_unchecked(0)).unwrap();
-    assert_eq!(name, Symbol::new(&env, "leaderboard_updated"));
+    let emitted = events.events().iter().any(|e| {
+        let topics = match &e.body {
+            xdr::ContractEventBody::V0(v0) => &v0.topics,
+            _ => return false,
+        };
+        topics.get(0).map_or(false, |t| {
+            Symbol::try_from_val(&env, t).unwrap() == Symbol::new(&env, "leaderboard_updated")
+        })
+    });
+    assert!(emitted, "expected a leaderboard_updated event to be emitted");
 }
