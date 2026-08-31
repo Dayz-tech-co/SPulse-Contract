@@ -2536,12 +2536,10 @@ fn test_place_bet_rejects_incompatible_referral() {
     let cfg = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &fake_referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            referral: fake_referral.clone(),
+            ..cfg.clone()
+        },
     );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
@@ -2607,16 +2605,17 @@ fn activate_config(
     leaderboard: &Address,
     xlm_sac: &Address,
 ) {
-    t.client
-        .set_config(
-            &t.admin,
-            token,
-            referral,
-            leaderboard,
-            xlm_sac,
-            &1_u32,
-            &1_u32,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            token: token.clone(),
+            referral: referral.clone(),
+            leaderboard: leaderboard.clone(),
+            xlm_sac: xlm_sac.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
 }
@@ -2949,12 +2948,14 @@ fn test_set_config_is_timelocked() {
     let before = t.client.get_config();
     t.client.set_config(
         &t.admin,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
-        &1_u32,
-        &1_u32,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
     );
 
     // Staged but NOT applied yet.
@@ -2983,16 +2984,13 @@ fn test_execute_set_config_before_delay_rejected() {
     // A real contract deployment must be staged: set_config validates that
     // every dependency is the expected executable kind (issue #51/#6).
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     // Too soon — the timelock has not matured.
     t.client.execute_set_config(&t.admin);
 }
@@ -3020,16 +3018,13 @@ fn test_set_config_does_not_apply_immediately() {
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
 
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 
     // Live config is unchanged until execute_set_config after the delay.
     assert_eq!(t.client.get_config().leaderboard, cfg.leaderboard);
@@ -3046,12 +3041,10 @@ fn test_set_config_rejects_arbitrary_address() {
     let attacker = Address::generate(&t.env);
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &attacker,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            referral: attacker.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -3063,12 +3056,10 @@ fn test_set_config_rejects_wasm_as_xlm_sac() {
     // A WASM/native contract must not be installable as the XLM SAC.
     t.client.set_config(
         &t.admin,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.token,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
+        &Config {
+            xlm_sac: cfg.token.clone(),
+            ..cfg.clone()
+        },
     );
 }
 
@@ -3078,16 +3069,13 @@ fn test_set_config_execute_before_delay() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.execute_set_config(&t.admin);
 }
 
@@ -3096,16 +3084,13 @@ fn test_set_config_execute_after_delay_and_pin() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&t.admin);
 
@@ -3120,16 +3105,13 @@ fn test_cancel_set_config_during_dispute_window() {
     let t = setup();
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.cancel_set_config(&t.admin);
     assert!(t.client.get_pending_config().is_none());
     assert_eq!(t.client.get_config().leaderboard, cfg.leaderboard);
@@ -3145,16 +3127,13 @@ fn test_set_config_multisig_requires_threshold() {
 
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     advance_time(&t.env, CONFIG_DELAY_SECS);
     // Only the proposer approved (1 of 2).
     t.client.execute_set_config(&t.admin);
@@ -3168,16 +3147,13 @@ fn test_cancel_set_config_removes_pending() {
     // every dependency is the expected executable kind (issue #51/#6).
     let new_lb = second_leaderboard(&t);
     let cfg = t.client.get_config();
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     assert!(t.client.get_pending_config().is_some());
 
     t.client.cancel_set_config(&t.admin);
@@ -3197,12 +3173,14 @@ fn test_set_config_rejects_non_admin() {
     let new_xlm = Address::generate(&t.env);
     t.client.set_config(
         &rando,
-        &new_token,
-        &new_referral,
-        &new_leaderboard,
-        &new_xlm,
-        &1_u32,
-        &1_u32,
+        &Config {
+            token: new_token.clone(),
+            referral: new_referral.clone(),
+            leaderboard: new_leaderboard.clone(),
+            xlm_sac: new_xlm.clone(),
+            expected_referral_version: 1,
+            expected_leaderboard_version: 1,
+        },
     );
 }
 
@@ -3215,16 +3193,13 @@ fn test_set_config_multisig_execute_with_second_approval() {
 
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
     t.client.approve_set_config(&g2);
     advance_time(&t.env, CONFIG_DELAY_SECS);
     t.client.execute_set_config(&g2);
@@ -3238,15 +3213,7 @@ fn test_set_config_non_governor_rejected() {
     let t = setup();
     let cfg = t.client.get_config();
     let stranger = Address::generate(&t.env);
-    t.client.set_config(
-        &stranger,
-        &cfg.token,
-        &cfg.referral,
-        &cfg.leaderboard,
-        &cfg.xlm_sac,
-        &cfg.expected_referral_version,
-        &cfg.expected_leaderboard_version,
-    );
+    t.client.set_config(&stranger, &cfg);
 }
 
 fn last_event_name(env: &Env) -> Symbol {
@@ -3470,28 +3437,22 @@ fn test_set_config_rejects_duplicate_proposal() {
     // every dependency is the expected executable kind (issue #51/#6).
     let cfg = t.client.get_config();
     let new_lb = second_leaderboard(&t);
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 
     // A second proposal while one is pending must be rejected.
-    t.client
-        .set_config(
-            &t.admin,
-            &cfg.token,
-            &cfg.referral,
-            &new_lb,
-            &cfg.xlm_sac,
-            &cfg.expected_referral_version,
-            &cfg.expected_leaderboard_version,
-        );
+    t.client.set_config(
+        &t.admin,
+        &Config {
+            leaderboard: new_lb.clone(),
+            ..cfg.clone()
+        },
+    );
 }
 
 #[test]

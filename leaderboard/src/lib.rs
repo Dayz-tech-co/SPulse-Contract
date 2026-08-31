@@ -475,7 +475,9 @@ impl LeaderboardContract {
         // exists — a user who never accrued points must read 0, not panic.
         let key = DataKey::Stats(user);
         if env.storage().persistent().has(&key) {
-            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         }
         pts
     }
@@ -489,7 +491,9 @@ impl LeaderboardContract {
         // zeroed stats, not panic on extend_ttl of a missing key.
         let key = DataKey::Stats(user);
         if env.storage().persistent().has(&key) {
-            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         }
         stats
     }

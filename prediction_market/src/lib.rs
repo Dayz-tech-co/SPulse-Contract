@@ -438,27 +438,18 @@ impl PredictionMarketContract {
         Ok(())
     }
 
-    /// Stage a config change (token / referral / leaderboard / xlm_sac). Admin
-    /// only. The change does NOT take effect immediately: it must mature past
-    /// CONFIG_DELAY_SECS via execute_set_config, giving off-chain
-    /// monitors time to detect it (via the ConfigChangeStaged event) and the
-    /// admin time to cancel it with cancel_set_config (issue #93).
-    /// Propose a Config change. Does **not** take effect immediately.
+    /// Propose a Config change (token / referral / leaderboard / xlm_sac +
+    /// expected ABI versions). Governor only. Does **not** take effect
+    /// immediately: it must mature past `CONFIG_DELAY_SECS` via
+    /// `execute_set_config`, giving off-chain monitors time to detect it (via
+    /// the ConfigChangeStaged event) and any governor time to cancel it with
+    /// `cancel_set_config` (issue #93).
     ///
     /// Live WASM hashes are read on-chain (not caller-supplied), the
     /// proposal is emitted for monitors, and it only becomes active after
     /// `CONFIG_DELAY_SECS` **and** `GovernorThreshold` approvals via
     /// `execute_set_config`. Any governor can `cancel_set_config` in between.
-    pub fn set_config(
-        env: Env,
-        caller: Address,
-        token_contract: Address,
-        referral_contract: Address,
-        leaderboard_contract: Address,
-        xlm_sac: Address,
-        expected_referral_version: u32,
-        expected_leaderboard_version: u32,
-    ) -> Result<(), MarketError> {
+    pub fn set_config(env: Env, caller: Address, cfg: Config) -> Result<(), MarketError> {
         caller.require_auth();
         Self::require_governor(&env, &caller)?;
         if env.storage().instance().has(&DataKey::PendingConfig) {
@@ -467,22 +458,15 @@ impl PredictionMarketContract {
 
         let hashes = Self::fingerprint_config(
             &env,
-            &token_contract,
-            &referral_contract,
-            &leaderboard_contract,
-            &xlm_sac,
+            &cfg.token,
+            &cfg.referral,
+            &cfg.leaderboard,
+            &cfg.xlm_sac,
         )?;
         let mut approvers: Vec<Address> = Vec::new(&env);
         approvers.push_back(caller.clone());
         let pending = PendingConfigChange {
-            cfg: Config {
-                token: token_contract,
-                referral: referral_contract,
-                leaderboard: leaderboard_contract,
-                xlm_sac,
-                expected_referral_version,
-                expected_leaderboard_version,
-            },
+            cfg: cfg.clone(),
             hashes,
             requested_at: env.ledger().timestamp(),
             approvers,
@@ -1928,7 +1912,9 @@ impl PredictionMarketContract {
             .ok_or(MarketError::NoBetFound)?;
         // Issue #166: extend TTL on read so claimable bet data cannot expire
         // while a user is inspecting it.
-        env.storage().persistent().extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
+        env.storage()
+            .persistent()
+            .extend_ttl(&bet_key, TTL_BUMP, TTL_HIGH);
         Ok(Bet {
             amount: e.net_yes.max(e.net_no),
             is_yes: e.net_yes >= e.net_no,
@@ -2077,11 +2063,7 @@ impl PredictionMarketContract {
 
     pub fn get_payout(env: Env, market_id: u64, user: Address) -> i128 {
         let key = DataKey::Payout(market_id, user);
-        let val: i128 = env
-            .storage()
-            .persistent()
-            .get(&key)
-            .unwrap_or(0);
+        let val: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         Self::bump_if_present(&env, &key);
         val
     }
@@ -2095,7 +2077,9 @@ impl PredictionMarketContract {
         // Issue #166: extend TTL on read so fee ledger data cannot expire.
         if market_id != LEGACY_MARKET_ID {
             let key = DataKey::MarketFees(market_id);
-            env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+            env.storage()
+                .persistent()
+                .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         }
         fees
     }
