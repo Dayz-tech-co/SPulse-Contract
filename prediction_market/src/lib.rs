@@ -166,6 +166,8 @@ pub enum MarketError {
     /// Issue #55: too many concurrently open markets — resolve or cancel some
     /// before creating more.
     TooManyOpenMarkets = 41,
+    /// Issue #1: reentrancy detected — a reentrant call was rejected.
+    ReentrancyDetected = 42,
 }
 
 // ── Storage Keys ──────────────────────────────────────────────────────────────
@@ -941,7 +943,7 @@ impl PredictionMarketContract {
         // Issue 89: reentrancy guard — set lock before any external call
         let lock_key = DataKey::BetLock(market_id, user.clone());
         if env.storage().persistent().get(&lock_key).unwrap_or(false) {
-            return Err(MarketError::NotAuthorized); // reentrancy attempt
+            return Err(MarketError::ReentrancyDetected); // reentrancy attempt
         }
         env.storage().persistent().set(&lock_key, &true);
 

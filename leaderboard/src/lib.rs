@@ -912,7 +912,9 @@ impl LeaderboardContract {
         let key = DataKey::MintedTo(user.clone());
         let minted: i128 = env.storage().persistent().get(&key).unwrap_or(0);
         env.storage().persistent().set(&key, &(minted + tokens));
-        env.storage().persistent().extend_ttl(&key, TTL_BUMP, TTL_HIGH);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_BUMP, TTL_HIGH);
         Ok(())
     }
 
